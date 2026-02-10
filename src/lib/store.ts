@@ -4,6 +4,9 @@ import { ScenarioData, ScenarioName } from './types';
 
 const STORAGE_KEY = 'neolink-gtm-dashboard-v1';
 const SCENARIO_TABLE = 'scenarios';
+import { ScenarioData, ScenarioName } from './types';
+
+const STORAGE_KEY = 'neolink-gtm-dashboard-v1';
 
 export interface AppState {
   selectedScenario: ScenarioName;
@@ -21,6 +24,7 @@ export const defaultState: AppState = {
 };
 
 function loadStateLocal(): AppState {
+export function loadState(): AppState {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return defaultState;
 
@@ -85,6 +89,10 @@ export async function saveState(state: AppState): Promise<void> {
   await Promise.all(
     (Object.keys(state.scenarios) as ScenarioName[]).map((name) => upsertScenario({ name, payload: state.scenarios[name] }))
   );
+}
+
+export function saveState(state: AppState): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function duplicateScenario(state: AppState, source: ScenarioName, target: ScenarioName): AppState {
