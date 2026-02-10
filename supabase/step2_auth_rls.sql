@@ -13,22 +13,29 @@ create table if not exists public.scenarios (
 
 alter table public.scenarios enable row level security;
 
+-- PostgreSQL/Supabase does not support CREATE POLICY IF NOT EXISTS,
+-- so make this script rerunnable by dropping policies first.
+drop policy if exists "scenarios_select_own" on public.scenarios;
+drop policy if exists "scenarios_insert_own" on public.scenarios;
+drop policy if exists "scenarios_update_own" on public.scenarios;
+drop policy if exists "scenarios_delete_own" on public.scenarios;
+
 -- Users can read only their own rows.
-create policy if not exists "scenarios_select_own"
+create policy "scenarios_select_own"
   on public.scenarios
   for select
   to authenticated
   using (created_by = auth.uid());
 
 -- Users can insert only rows for themselves.
-create policy if not exists "scenarios_insert_own"
+create policy "scenarios_insert_own"
   on public.scenarios
   for insert
   to authenticated
   with check (created_by = auth.uid());
 
 -- Users can update only their own rows.
-create policy if not exists "scenarios_update_own"
+create policy "scenarios_update_own"
   on public.scenarios
   for update
   to authenticated
@@ -36,7 +43,7 @@ create policy if not exists "scenarios_update_own"
   with check (created_by = auth.uid());
 
 -- Users can delete only their own rows.
-create policy if not exists "scenarios_delete_own"
+create policy "scenarios_delete_own"
   on public.scenarios
   for delete
   to authenticated

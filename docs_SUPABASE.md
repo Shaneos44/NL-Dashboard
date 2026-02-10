@@ -4,6 +4,8 @@
 
 1. In Supabase, enable at least one auth provider (email/password is enough to start).
 2. Run SQL in `supabase/step2_auth_rls.sql`.
+   - Note: `CREATE POLICY IF NOT EXISTS` is not supported in Supabase Postgres.
+   - The script is rerunnable because it uses `DROP POLICY IF EXISTS` before each `CREATE POLICY`.
 3. Ensure your frontend signs in users before save/read calls.
 4. Verify RLS quickly:
    - User A creates a scenario.
