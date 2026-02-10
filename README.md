@@ -39,9 +39,16 @@ This repo now includes automatic deploy workflow:
 
 After that, every push to `main` or `work` auto-deploys.
 
-Your site URL will be:
+After the first successful deploy, your site URL will be:
 
 `https://Shaneos44.github.io/NL-Dashboard/`
+
+### If you see "There isn't a GitHub Pages site here"
+
+1. Go to **Settings → Pages**.
+2. Set **Source** to **GitHub Actions**.
+3. Push a new commit to `main` or `work` (or run the workflow manually from Actions).
+4. Wait for **Deploy to GitHub Pages** workflow to finish successfully.
 
 ## Supabase SQL
 
