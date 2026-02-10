@@ -1,15 +1,41 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useEffect, useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { EditableTable } from './components/EditableTable';
 import { KpiCard } from './components/KpiCard';
 import './components/styles.css';
-import { computeCostBreakdown, computeTaktTimeMinutes, evaluateSixPack, machineRequirementForStation, riskScore, sixPackYieldPct } from './lib/calc';
-import { defaultState, duplicateScenario, exportScenarioJson, inventoryCsv, loadState, saveState, sixPackCsv } from './lib/store';
-import { loadState, saveState, duplicateScenario, exportScenarioJson, inventoryCsv, sixPackCsv } from './lib/store';
+import {
+  computeCostBreakdown,
+  computeTaktTimeMinutes,
+  evaluateSixPack,
+  machineRequirementForStation,
+  riskScore,
+  sixPackYieldPct,
+} from './lib/calc';
+import {
+  defaultState,
+  duplicateScenario,
+  exportScenarioJson,
+  inventoryCsv,
+  loadState,
+  saveState,
+  sixPackCsv,
+} from './lib/store';
 import { ScenarioName } from './lib/types';
 
-const tabs = ['Inputs', 'Processes', 'Inventory', 'Machines', 'Warehouses', 'Logistics/Lanes', 'Maintenance', 'Quality', 'Six Pack', 'Risk', 'Audit/Change Log', 'Summary / Export'];
+const tabs = [
+  'Inputs',
+  'Processes',
+  'Inventory',
+  'Machines',
+  'Warehouses',
+  'Logistics/Lanes',
+  'Maintenance',
+  'Quality',
+  'Six Pack',
+  'Risk',
+  'Audit/Change Log',
+  'Summary / Export',
+];
 
 function downloadFile(filename: string, content: string, type: string) {
   const blob = new Blob([content], { type });
@@ -50,14 +76,10 @@ export default function App() {
     }
 
     setSyncStatus('syncing');
-    saveState(state)
+    void saveState(state)
       .then(() => setSyncStatus('synced'))
       .catch(() => setSyncStatus('error'));
   }, [loading, state]);
-  const [state, setState] = useState(loadState());
-  const [activeTab, setActiveTab] = useState(tabs[0]);
-
-  useEffect(() => saveState(state), [state]);
 
   const scenario = state.scenarios[state.selectedScenario];
   const cost = useMemo(() => computeCostBreakdown(scenario), [scenario]);
@@ -94,16 +116,41 @@ export default function App() {
       <div className="small">Data sync: {syncStatus}</div>
 
       <div className="header">
-        <select value={state.selectedScenario} onChange={(e) => setState((s) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))}>
-          {scenarios.map((n) => <option key={n} value={n}>{n}</option>)}
+        <select
+          value={state.selectedScenario}
+          onChange={(e) => setState((s) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))}
+        >
+          {scenarios.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
         </select>
-        <button onClick={() => {
-          const next = duplicateScenario(state, state.selectedScenario, state.selectedScenario === 'Pilot' ? 'Ramp' : 'Scale');
-          setState(next);
-        }}>Duplicate Scenario</button>
-        <button onClick={() => downloadFile(`${scenario.name}.json`, exportScenarioJson(scenario), 'application/json')}>Export JSON</button>
-        <button onClick={() => downloadFile(`${scenario.name}-inventory.csv`, inventoryCsv(scenario), 'text/csv')}>Export Inventory CSV</button>
-        <button onClick={() => downloadFile(`${scenario.name}-sixpack.csv`, sixPackCsv(scenario), 'text/csv')}>Export Six Pack CSV</button>
+
+        <button
+          onClick={() => {
+            const next = duplicateScenario(
+              state,
+              state.selectedScenario,
+              state.selectedScenario === 'Pilot' ? 'Ramp' : 'Scale'
+            );
+            setState(next);
+          }}
+        >
+          Duplicate Scenario
+        </button>
+
+        <button onClick={() => downloadFile(`${scenario.name}.json`, exportScenarioJson(scenario), 'application/json')}>
+          Export JSON
+        </button>
+        <button
+          onClick={() => downloadFile(`${scenario.name}-inventory.csv`, inventoryCsv(scenario), 'text/csv')}
+        >
+          Export Inventory CSV
+        </button>
+        <button onClick={() => downloadFile(`${scenario.name}-sixpack.csv`, sixPackCsv(scenario), 'text/csv')}>
+          Export Six Pack CSV
+        </button>
       </div>
 
       <div className="kpis">
@@ -125,7 +172,7 @@ export default function App() {
                 <XAxis dataKey="volume" />
                 <YAxis unit="%" />
                 <Tooltip />
-                <Line type="monotone" dataKey="marginPct" stroke="#63d6ff" strokeWidth={2} />
+                <Line type="monotone" dataKey="marginPct" strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -143,7 +190,9 @@ export default function App() {
 
       <div className="tab-row">
         {tabs.map((tab) => (
-          <button key={tab} className={tab === activeTab ? 'active' : ''} onClick={() => setActiveTab(tab)}>{tab}</button>
+          <button key={tab} className={tab === activeTab ? 'active' : ''} onClick={() => setActiveTab(tab)}>
+            {tab}
+          </button>
         ))}
       </div>
 
@@ -152,15 +201,31 @@ export default function App() {
           <h3>Global Drivers</h3>
           <div className="header">
             {Object.entries(scenario.inputs).map(([k, v]) => (
-              <label key={k}>{k}
-                <input type="number" value={v} onChange={(e) => updateScenario({ ...scenario, inputs: { ...scenario.inputs, [k]: Number(e.target.value) }, auditLog: [...scenario.auditLog, `Updated input ${k}`] })} />
+              <label key={k}>
+                {k}
+                <input
+                  type="number"
+                  value={v}
+                  onChange={(e) =>
+                    updateScenario({
+                      ...scenario,
+                      inputs: { ...scenario.inputs, [k]: Number(e.target.value) },
+                      auditLog: [...scenario.auditLog, `Updated input ${k}`],
+                    })
+                  }
+                />
               </label>
             ))}
           </div>
         </div>
       )}
 
-      {activeTab === 'Processes' && <div className="card"><h3>Process Throughput</h3><p>Cycle time, OEE and bottleneck shown in Machines tab with machine requirement estimates.</p></div>}
+      {activeTab === 'Processes' && (
+        <div className="card">
+          <h3>Process Throughput</h3>
+          <p>Cycle time, OEE and bottleneck shown in Machines tab with machine requirement estimates.</p>
+        </div>
+      )}
 
       {activeTab === 'Inventory' && (
         <EditableTable
@@ -176,8 +241,16 @@ export default function App() {
             { key: 'singleSource', label: 'Single Source', type: 'checkbox' },
           ]}
           onChange={(rows) => updateScenario({ ...scenario, inventory: rows, auditLog: [...scenario.auditLog, 'Inventory table edited'] })}
-          createRow={() => ({ id: crypto.randomUUID(), name: 'New item', category: 'RM' as const, unitCost: 0, usagePerProduct: 1, leadTimeDays: 0, moq: 0, singleSource: false })}
-          createRow={() => ({ id: crypto.randomUUID(), name: 'New item', category: 'RM', unitCost: 0, usagePerProduct: 1, leadTimeDays: 0, moq: 0, singleSource: false })}
+          createRow={() => ({
+            id: crypto.randomUUID(),
+            name: 'New item',
+            category: 'RM' as const,
+            unitCost: 0,
+            usagePerProduct: 1,
+            leadTimeDays: 0,
+            moq: 0,
+            singleSource: false,
+          })}
         />
       )}
 
@@ -187,19 +260,87 @@ export default function App() {
           <ul>
             {scenario.machines.map((m) => {
               const req = machineRequirementForStation(scenario, m.cycleTimeSec);
-              return <li key={m.id}>{m.station}: required {req.toFixed(2)} vs installed {m.machinesInstalled}</li>;
+              return (
+                <li key={m.id}>
+                  {m.station}: required {req.toFixed(2)} vs installed {m.machinesInstalled}
+                </li>
+              );
             })}
           </ul>
         </div>
       )}
 
-      {activeTab === 'Warehouses' && <EditableTable title="Warehouse Planning" rows={scenario.warehouses} columns={[{ key: 'location', label: 'Location' }, { key: 'type', label: 'Type' }, { key: 'monthlyCost', label: 'Monthly Cost', type: 'number' }, { key: 'utilizationPct', label: 'Utilization', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, warehouses: rows })} createRow={() => ({ id: crypto.randomUUID(), location: 'New DC', type: 'FG' as const, monthlyCost: 0, utilizationPct: 0.5 })} />}
-      {activeTab === 'Logistics/Lanes' && <EditableTable title="Transport Lanes" rows={scenario.logistics} columns={[{ key: 'lane', label: 'Lane' }, { key: 'direction', label: 'Direction' }, { key: 'mode', label: 'Mode' }, { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' }, { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, logistics: rows })} createRow={() => ({ id: crypto.randomUUID(), lane: 'New Lane', direction: 'Inbound' as const, mode: 'Road' as const, costPerShipment: 0, unitsPerShipment: 1 })} />}
-      {activeTab === 'Warehouses' && <EditableTable title="Warehouse Planning" rows={scenario.warehouses} columns={[{ key: 'location', label: 'Location' }, { key: 'type', label: 'Type' }, { key: 'monthlyCost', label: 'Monthly Cost', type: 'number' }, { key: 'utilizationPct', label: 'Utilization', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, warehouses: rows })} createRow={() => ({ id: crypto.randomUUID(), location: 'New DC', type: 'FG', monthlyCost: 0, utilizationPct: 0.5 })} />}
-      {activeTab === 'Logistics/Lanes' && <EditableTable title="Transport Lanes" rows={scenario.logistics} columns={[{ key: 'lane', label: 'Lane' }, { key: 'direction', label: 'Direction' }, { key: 'mode', label: 'Mode' }, { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' }, { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, logistics: rows })} createRow={() => ({ id: crypto.randomUUID(), lane: 'New Lane', direction: 'Inbound', mode: 'Road', costPerShipment: 0, unitsPerShipment: 1 })} />}
-      {activeTab === 'Maintenance' && <EditableTable title="Maintenance" rows={scenario.maintenance} columns={[{ key: 'machineType', label: 'Machine Type' }, { key: 'pmHoursPerMonth', label: 'PM hrs/mo', type: 'number' }, { key: 'sparesCostPerMonth', label: 'Spares', type: 'number' }, { key: 'serviceCostPerMonth', label: 'Service', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, maintenance: rows })} createRow={() => ({ id: crypto.randomUUID(), machineType: 'New', pmHoursPerMonth: 0, sparesCostPerMonth: 0, serviceCostPerMonth: 0 })} />}
+      {activeTab === 'Warehouses' && (
+        <EditableTable
+          title="Warehouse Planning"
+          rows={scenario.warehouses}
+          columns={[
+            { key: 'location', label: 'Location' },
+            { key: 'type', label: 'Type' },
+            { key: 'monthlyCost', label: 'Monthly Cost', type: 'number' },
+            { key: 'utilizationPct', label: 'Utilization', type: 'number' },
+          ]}
+          onChange={(rows) => updateScenario({ ...scenario, warehouses: rows })}
+          createRow={() => ({
+            id: crypto.randomUUID(),
+            location: 'New DC',
+            type: 'FG' as const,
+            monthlyCost: 0,
+            utilizationPct: 0.5,
+          })}
+        />
+      )}
 
-      {activeTab === 'Quality' && <div className="card"><h3>Quality module</h3><p>Includes quality cost in total cost model and Six Pack capability checks.</p></div>}
+      {activeTab === 'Logistics/Lanes' && (
+        <EditableTable
+          title="Transport Lanes"
+          rows={scenario.logistics}
+          columns={[
+            { key: 'lane', label: 'Lane' },
+            { key: 'direction', label: 'Direction' },
+            { key: 'mode', label: 'Mode' },
+            { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' },
+            { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' },
+          ]}
+          onChange={(rows) => updateScenario({ ...scenario, logistics: rows })}
+          createRow={() => ({
+            id: crypto.randomUUID(),
+            lane: 'New Lane',
+            direction: 'Inbound' as const,
+            mode: 'Road' as const,
+            costPerShipment: 0,
+            unitsPerShipment: 1,
+          })}
+        />
+      )}
+
+      {activeTab === 'Maintenance' && (
+        <EditableTable
+          title="Maintenance"
+          rows={scenario.maintenance}
+          columns={[
+            { key: 'machineType', label: 'Machine Type' },
+            { key: 'pmHoursPerMonth', label: 'PM hrs/mo', type: 'number' },
+            { key: 'sparesCostPerMonth', label: 'Spares', type: 'number' },
+            { key: 'serviceCostPerMonth', label: 'Service', type: 'number' },
+          ]}
+          onChange={(rows) => updateScenario({ ...scenario, maintenance: rows })}
+          createRow={() => ({
+            id: crypto.randomUUID(),
+            machineType: 'New',
+            pmHoursPerMonth: 0,
+            sparesCostPerMonth: 0,
+            serviceCostPerMonth: 0,
+          })}
+        />
+      )}
+
+      {activeTab === 'Quality' && (
+        <div className="card">
+          <h3>Quality module</h3>
+          <p>Includes quality cost in total cost model and Six Pack capability checks.</p>
+        </div>
+      )}
 
       {activeTab === 'Six Pack' && (
         <div className="card">
@@ -207,17 +348,54 @@ export default function App() {
           <ul>
             {scenario.sixPack.map((r) => {
               const ev = evaluateSixPack(r);
-              return <li key={r.id}>{r.metric}: {ev.pass ? 'PASS' : 'FAIL'} (Cp {ev.cp.toFixed(2)} Cpk {ev.cpk.toFixed(2)})</li>;
+              return (
+                <li key={r.id}>
+                  {r.metric}: {ev.pass ? 'PASS' : 'FAIL'} (Cp {ev.cp.toFixed(2)} Cpk {ev.cpk.toFixed(2)})
+                </li>
+              );
             })}
           </ul>
           <button onClick={() => window.print()}>Print Six Pack Report</button>
         </div>
       )}
 
-      {activeTab === 'Risk' && <EditableTable title="Risk Register" rows={scenario.risks} columns={[{ key: 'area', label: 'Area' }, { key: 'status', label: 'Status' }, { key: 'mitigation', label: 'Mitigation' }, { key: 'owner', label: 'Owner' }]} onChange={(rows) => updateScenario({ ...scenario, risks: rows })} createRow={() => ({ id: crypto.randomUUID(), area: 'New area', status: 'Amber' as const, mitigation: '', owner: '' })} />}
-      {activeTab === 'Risk' && <EditableTable title="Risk Register" rows={scenario.risks} columns={[{ key: 'area', label: 'Area' }, { key: 'status', label: 'Status' }, { key: 'mitigation', label: 'Mitigation' }, { key: 'owner', label: 'Owner' }]} onChange={(rows) => updateScenario({ ...scenario, risks: rows })} createRow={() => ({ id: crypto.randomUUID(), area: 'New area', status: 'Amber', mitigation: '', owner: '' })} />}
-      {activeTab === 'Audit/Change Log' && <div className="card"><h3>Audit Log</h3><ul>{scenario.auditLog.map((e, i) => <li key={i}>{e}</li>)}</ul></div>}
-      {activeTab === 'Summary / Export' && <div className="card"><h3>Summary</h3><p>Gross margin per unit: €{cost.marginPerUnit.toFixed(2)} | Total cost per unit: €{cost.total.toFixed(2)}</p></div>}
+      {activeTab === 'Risk' && (
+        <EditableTable
+          title="Risk Register"
+          rows={scenario.risks}
+          columns={[
+            { key: 'area', label: 'Area' },
+            { key: 'status', label: 'Status' },
+            { key: 'mitigation', label: 'Mitigation' },
+            { key: 'owner', label: 'Owner' },
+          ]}
+          onChange={(rows) => updateScenario({ ...scenario, risks: rows })}
+          createRow={() => ({
+            id: crypto.randomUUID(),
+            area: 'New area',
+            status: 'Amber' as const,
+            mitigation: '',
+            owner: '',
+          })}
+        />
+      )}
+
+      {activeTab === 'Audit/Change Log' && (
+        <div className="card">
+          <h3>Audit Log</h3>
+          <ul>{scenario.auditLog.map((e, i) => <li key={i}>{e}</li>)}</ul>
+        </div>
+      )}
+
+      {activeTab === 'Summary / Export' && (
+        <div className="card">
+          <h3>Summary</h3>
+          <p>
+            Gross margin per unit: €{cost.marginPerUnit.toFixed(2)} | Total cost per unit: €
+            {cost.total.toFixed(2)}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
