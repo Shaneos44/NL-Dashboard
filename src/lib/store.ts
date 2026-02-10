@@ -37,7 +37,6 @@ function saveStateLocal(state: AppState): void {
 
 export async function loadState(): Promise<AppState> {
   const local = loadStateLocal();
-
   if (!supabase) return local;
 
   const { data, error } = await supabase
@@ -70,7 +69,6 @@ async function upsertScenario(row: ScenarioRow): Promise<void> {
 
 export async function saveState(state: AppState): Promise<void> {
   saveStateLocal(state);
-
   if (!supabase) return;
 
   await Promise.all(
@@ -78,4 +76,61 @@ export async function saveState(state: AppState): Promise<void> {
       upsertScenario({ name, payload: state.scenarios[name] })
     )
   );
+}
+
+/** Utilities used by App.tsx and tests */
+export function duplicateScenario(
+  state: AppState,
+  source: ScenarioName,
+  target: ScenarioName
+): AppState {
+  const next = structuredClone(state) as AppState;
+  next.scenarios[target] = {
+    ...structuredClone(state.scenarios[source]),
+    name: target,
+    auditLog: [
+      ...state.scenarios[source].auditLog,
+      `Duplicated from ${source} at ${new Date().toISOString()}`,
+    ],
+  };
+  return next;
+}
+
+export function exportScenarioJson(s: ScenarioData): string {
+  return JSON.stringify(s, null, 2);
+}
+
+export function inventoryCsv(s: ScenarioData): string {
+  const header =
+    'id,name,category,unitCost,usagePerProduct,leadTimeDays,moq,singleSource';
+  const rows = s.inventory.map((i) =>
+    [
+      i.id,
+      i.name,
+      i.category,
+      i.unitCost,
+      i.usagePerProduct,
+      i.leadTimeDays,
+      i.moq,
+      i.singleSource,
+    ].join(',')
+  );
+  return [header, ...rows].join('\n');
+}
+
+export function sixPackCsv(s: ScenarioData): string {
+  const header = 'id,metric,mode,mean,stdDev,lsl,usl,flaggedPass';
+  const rows = s.sixPack.map((r) =>
+    [
+      r.id,
+      r.metric,
+      r.mode,
+      r.mean,
+      r.stdDev,
+      r.lsl,
+      r.usl,
+      r.flaggedPass ?? '',
+    ].join(',')
+  );
+  return [header, ...rows].join('\n');
 }
