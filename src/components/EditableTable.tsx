@@ -2,13 +2,13 @@ import './styles.css';
 
 type ColumnType = 'text' | 'number' | 'checkbox';
 
-export type ColumnDef<T extends Record<string, unknown>> = {
+type ColumnDef<T> = {
   key: keyof T;
   label: string;
   type?: ColumnType;
 };
 
-interface EditableTableProps<T extends Record<string, unknown>> {
+interface EditableTableProps<T extends { id?: string }> {
   title: string;
   rows: T[];
   columns: ColumnDef<T>[];
@@ -16,7 +16,7 @@ interface EditableTableProps<T extends Record<string, unknown>> {
   createRow: () => T;
 }
 
-export function EditableTable<T extends Record<string, unknown>>({
+export function EditableTable<T extends { id?: string }>({
   title,
   rows,
   columns,
@@ -25,7 +25,7 @@ export function EditableTable<T extends Record<string, unknown>>({
 }: EditableTableProps<T>) {
   const updateCell = (rowIndex: number, key: keyof T, value: unknown) => {
     const next = [...rows];
-    next[rowIndex] = { ...next[rowIndex], [key]: value } as T;
+    next[rowIndex] = { ...(next[rowIndex] as any), [key]: value } as T;
     onChange(next);
   };
 
@@ -48,9 +48,9 @@ export function EditableTable<T extends Record<string, unknown>>({
 
           <tbody>
             {rows.map((r, i) => (
-              <tr key={String((r as any).id ?? i)}>
+              <tr key={String(r.id ?? i)}>
                 {columns.map((c) => {
-                  const value = r[c.key];
+                  const value = (r as any)[c.key];
 
                   if (c.type === 'checkbox') {
                     return (
@@ -58,7 +58,9 @@ export function EditableTable<T extends Record<string, unknown>>({
                         <input
                           type="checkbox"
                           checked={Boolean(value)}
-                          onChange={(e) => updateCell(i, c.key, e.target.checked)}
+                          onChange={(e) =>
+                            updateCell(i, c.key, e.target.checked)
+                          }
                         />
                       </td>
                     );
