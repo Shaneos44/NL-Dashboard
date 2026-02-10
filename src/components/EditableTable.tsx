@@ -2,24 +2,30 @@ import './styles.css';
 
 type ColumnType = 'text' | 'number' | 'checkbox';
 
-interface EditableTableProps<T extends { id?: string }> {
-  title: string;
-  rows: T[];
-  columns: { key: keyof T; label: string; type?: ColumnType }[];
+export type ColumnDef<T extends Record<string, unknown>> = {
+  key: keyof T;
+  label: string;
+  type?: ColumnType;
+};
+
 interface EditableTableProps<T extends Record<string, unknown>> {
   title: string;
   rows: T[];
-  columns: { key: keyof T; label: string; type?: 'text' | 'number' | 'checkbox' }[];
+  columns: ColumnDef<T>[];
   onChange: (rows: T[]) => void;
   createRow: () => T;
 }
 
-export function EditableTable<T extends { id?: string }>({ title, rows, columns, onChange, createRow }: EditableTableProps<T>) {
-  const updateCell = <K extends keyof T>(i: number, key: K, value: T[K]) => {
-export function EditableTable<T extends Record<string, unknown>>({ title, rows, columns, onChange, createRow }: EditableTableProps<T>) {
-  const updateCell = (i: number, key: keyof T, value: unknown) => {
+export function EditableTable<T extends Record<string, unknown>>({
+  title,
+  rows,
+  columns,
+  onChange,
+  createRow,
+}: EditableTableProps<T>) {
+  const updateCell = (rowIndex: number, key: keyof T, value: unknown) => {
     const next = [...rows];
-    next[i] = { ...next[i], [key]: value };
+    next[rowIndex] = { ...next[rowIndex], [key]: value } as T;
     onChange(next);
   };
 
@@ -29,14 +35,20 @@ export function EditableTable<T extends Record<string, unknown>>({ title, rows, 
         <h3>{title}</h3>
         <button onClick={() => onChange([...rows, createRow()])}>Add row</button>
       </div>
+
       <div className="table-wrap">
         <table>
           <thead>
-            <tr>{columns.map((c) => <th key={String(c.key)}>{c.label}</th>)}</tr>
+            <tr>
+              {columns.map((c) => (
+                <th key={String(c.key)}>{c.label}</th>
+              ))}
+            </tr>
           </thead>
+
           <tbody>
             {rows.map((r, i) => (
-              <tr key={String(r.id ?? i)}>
+              <tr key={String((r as any).id ?? i)}>
                 {columns.map((c) => {
                   const value = r[c.key];
 
@@ -46,32 +58,26 @@ export function EditableTable<T extends Record<string, unknown>>({ title, rows, 
                         <input
                           type="checkbox"
                           checked={Boolean(value)}
-                          onChange={(e) => updateCell(i, c.key, e.target.checked as T[typeof c.key])}
+                          onChange={(e) => updateCell(i, c.key, e.target.checked)}
                         />
-              <tr key={String((r.id as string | undefined) ?? i)}>
-                {columns.map((c) => {
-                  const value = r[c.key];
-                  if (c.type === 'checkbox') {
-                    return (
-                      <td key={String(c.key)}>
-                        <input type="checkbox" checked={Boolean(value)} onChange={(e) => updateCell(i, c.key, e.target.checked)} />
                       </td>
                     );
                   }
 
+                  const isNumber = c.type === 'number';
+
                   return (
                     <td key={String(c.key)}>
                       <input
-                        type={c.type === 'number' ? 'number' : 'text'}
-                        value={String(value ?? '')}
+                        type={isNumber ? 'number' : 'text'}
+                        value={value == null ? '' : String(value)}
                         onChange={(e) =>
                           updateCell(
                             i,
                             c.key,
-                            (c.type === 'number' ? Number(e.target.value) : e.target.value) as T[typeof c.key]
+                            isNumber ? Number(e.target.value) : e.target.value
                           )
                         }
-                        onChange={(e) => updateCell(i, c.key, c.type === 'number' ? Number(e.target.value) : e.target.value)}
                       />
                     </td>
                   );
