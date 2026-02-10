@@ -1,0 +1,215 @@
+diff --git a/package.json b/package.json
+index 0000000..1111111 100644
+--- a/package.json
++++ b/package.json
+@@ -1,33 +1,34 @@
+ {
+   "name": "neolink-gtm-dashboard",
+   "private": true,
+   "version": "0.1.0",
+   "type": "module",
+   "scripts": {
+     "dev": "vite",
+-    "build": "vite build",
+     "build": "tsc -b && vite build",
+     "preview": "vite preview",
+     "test": "vitest run",
+     "test:watch": "vitest"
+   },
+   "dependencies": {
+     "react": "^18.3.1",
+     "react-dom": "^18.3.1",
+     "recharts": "^2.15.1",
+-    "@supabase/supabase-js": "^2.49.1"
+-    "recharts": "^2.15.1"
++    "@supabase/supabase-js": "^2.49.1"
+   },
+   "devDependencies": {
+     "@testing-library/jest-dom": "^6.6.3",
+     "@testing-library/react": "^16.1.0",
+     "@testing-library/user-event": "^14.5.2",
+     "@types/react": "^18.3.12",
+     "@types/react-dom": "^18.3.1",
+     "@vitejs/plugin-react": "^4.3.4",
+     "jsdom": "^25.0.1",
+     "typescript": "^5.6.3",
+     "vite": "^5.4.10",
+     "vitest": "^2.1.4"
+   }
+ }
+
+diff --git a/src/lib/store.ts b/src/lib/store.ts
+index 0000000..2222222 100644
+--- a/src/lib/store.ts
++++ b/src/lib/store.ts
+@@ -1,87 +1,130 @@
+ import { defaultScenarios } from './data';
+ import { supabase } from './supabase';
+ import { ScenarioData, ScenarioName } from './types';
+
+ const STORAGE_KEY = 'neolink-gtm-dashboard-v1';
+ const SCENARIO_TABLE = 'scenarios';
+
+ export interface AppState {
+   selectedScenario: ScenarioName;
+   scenarios: Record<ScenarioName, ScenarioData>;
+ }
+
+ interface ScenarioRow {
+   name: ScenarioName;
+   payload: ScenarioData;
+ }
+
+ export const defaultState: AppState = {
+   selectedScenario: 'Pilot',
+   scenarios: defaultScenarios,
+ };
+
+ function loadStateLocal(): AppState {
+   const raw = localStorage.getItem(STORAGE_KEY);
+   if (!raw) return defaultState;
+
+   try {
+     return JSON.parse(raw) as AppState;
+   } catch {
+     return defaultState;
+   }
+ }
+
+ function saveStateLocal(state: AppState): void {
+   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+ }
+
+ export async function loadState(): Promise<AppState> {
+   const local = loadStateLocal();
+
+   if (!supabase) return local;
+
+   const { data, error } = await supabase
+     .from(SCENARIO_TABLE)
+     .select('name,payload')
+     .in('name', ['Pilot', 'Ramp', 'Scale']);
+
+   if (error || !data || data.length === 0) return local;
+
+   const scenarios = structuredClone(local.scenarios);
+   for (const row of data as ScenarioRow[]) {
+     scenarios[row.name] = row.payload;
+   }
+
+   return { selectedScenario: local.selectedScenario, scenarios };
+ }
+
+ async function upsertScenario(row: ScenarioRow): Promise<void> {
+   if (!supabase) return;
+
+   await supabase.from(SCENARIO_TABLE).upsert(
+     {
+       name: row.name,
+       payload: row.payload,
+       updated_at: new Date().toISOString(),
+     },
+     { onConflict: 'name,created_by' }
+   );
+ }
+
+ export async function saveState(state: AppState): Promise<void> {
+   saveStateLocal(state);
+
+   if (!supabase) return;
+
+   await Promise.all(
+     (Object.keys(state.scenarios) as ScenarioName[]).map((name) =>
+       upsertScenario({ name, payload: state.scenarios[name] })
+     )
+   );
+ }
++
++// ---------- Export / utility helpers used by App.tsx ----------
++export function duplicateScenario(state: AppState, source: ScenarioName, target: ScenarioName): AppState {
++  const next = structuredClone(state) as AppState;
++  next.scenarios[target] = {
++    ...structuredClone(state.scenarios[source]),
++    name: target,
++    auditLog: [...state.scenarios[source].auditLog, `Duplicated from ${source} at ${new Date().toISOString()}`],
++  };
++  return next;
++}
++
++export function exportScenarioJson(s: ScenarioData): string {
++  return JSON.stringify(s, null, 2);
++}
++
++export function inventoryCsv(s: ScenarioData): string {
++  const header = 'id,name,category,unitCost,usagePerProduct,leadTimeDays,moq,singleSource';
++  const rows = s.inventory.map((i) =>
++    [i.id, i.name, i.category, i.unitCost, i.usagePerProduct, i.leadTimeDays, i.moq, i.singleSource].join(',')
++  );
++  return [header, ...rows].join('\n');
++}
++
++export function sixPackCsv(s: ScenarioData): string {
++  const header = 'id,metric,mode,mean,stdDev,lsl,usl,flaggedPass';
++  const rows = s.sixPack.map((r) =>
++    [r.id, r.metric, r.mode, r.mean, r.stdDev, r.lsl, r.usl, r.flaggedPass ?? ''].join(',')
++  );
++  return [header, ...rows].join('\n');
++}
+
+diff --git a/src/App.tsx b/src/App.tsx
+index 0000000..3333333 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1,12 +1,11 @@
+ import { useEffect, useMemo, useRef, useState } from 'react';
+-import { useEffect, useMemo, useState } from 'react';
+ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+ import { EditableTable } from './components/EditableTable';
+ import { KpiCard } from './components/KpiCard';
+ import './components/styles.css';
+ import { computeCostBreakdown, computeTaktTimeMinutes, evaluateSixPack, machineRequirementForStation, riskScore, sixPackYieldPct } from './lib/calc';
+ import { defaultState, duplicateScenario, exportScenarioJson, inventoryCsv, loadState, saveState, sixPackCsv } from './lib/store';
+-import { loadState, saveState, duplicateScenario, exportScenarioJson, inventoryCsv, sixPackCsv } from './lib/store';
+ import { ScenarioName } from './lib/types';
+
+ const tabs = ['Inputs', 'Processes', 'Inventory', 'Machines', 'Warehouses', 'Logistics/Lanes', 'Maintenance', 'Quality', 'Six Pack', 'Risk', 'Audit/Change Log', 'Summary / Export'];
+
+@@ -49,12 +48,6 @@ export default function App() {
+       .catch(() => setSyncStatus('error'));
+   }, [loading, state]);
+-  const [state, setState] = useState(loadState());
+-  const [activeTab, setActiveTab] = useState(tabs[0]);
+-
+-  useEffect(() => saveState(state), [state]);
+
+   const scenario = state.scenarios[state.selectedScenario];
+   const cost = useMemo(() => computeCostBreakdown(scenario), [scenario]);
+   const takt = useMemo(() => computeTaktTimeMinutes(scenario), [scenario]);
+@@ -140,7 +133,7 @@ export default function App() {
+               </LineChart>
+             </ResponsiveContainer>
+           </div>
+         </div>
+
+@@ -198,8 +191,7 @@ export default function App() {
+           ]}
+           onChange={(rows) => updateScenario({ ...scenario, inventory: rows, auditLog: [...scenario.auditLog, 'Inventory table edited'] })}
+           createRow={() => ({ id: crypto.randomUUID(), name: 'New item', category: 'RM' as const, unitCost: 0, usagePerProduct: 1, leadTimeDays: 0, moq: 0, singleSource: false })}
+-          createRow={() => ({ id: crypto.randomUUID(), name: 'New item', category: 'RM', unitCost: 0, usagePerProduct: 1, leadTimeDays: 0, moq: 0, singleSource: false })}
+         />
+       )}
+
+@@ -219,10 +211,7 @@ export default function App() {
+       )}
+
+-      {activeTab === 'Warehouses' && <EditableTable title="Warehouse Planning" rows={scenario.warehouses} columns={[{ key: 'location', label: 'Location' }, { key: 'type', label: 'Type' }, { key: 'monthlyCost', label: 'Monthly Cost', type: 'number' }, { key: 'utilizationPct', label: 'Utilization', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, warehouses: rows })} createRow={() => ({ id: crypto.randomUUID(), location: 'New DC', type: 'FG' as const, monthlyCost: 0, utilizationPct: 0.5 })} />}
+-      {activeTab === 'Logistics/Lanes' && <EditableTable title="Transport Lanes" rows={scenario.logistics} columns={[{ key: 'lane', label: 'Lane' }, { key: 'direction', label: 'Direction' }, { key: 'mode', label: 'Mode' }, { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' }, { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, logistics: rows })} createRow={() => ({ id: crypto.randomUUID(), lane: 'New Lane', direction: 'Inbound' as const, mode: 'Road' as const, costPerShipment: 0, unitsPerShipment: 1 })} />}
+       {activeTab === 'Warehouses' && <EditableTable title="Warehouse Planning" rows={scenario.warehouses} columns={[{ key: 'location', label: 'Location' }, { key: 'type', label: 'Type' }, { key: 'monthlyCost', label: 'Monthly Cost', type: 'number' }, { key: 'utilizationPct', label: 'Utilization', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, warehouses: rows })} createRow={() => ({ id: crypto.randomUUID(), location: 'New DC', type: 'FG' as const, monthlyCost: 0, utilizationPct: 0.5 })} />}
+       {activeTab === 'Logistics/Lanes' && <EditableTable title="Transport Lanes" rows={scenario.logistics} columns={[{ key: 'lane', label: 'Lane' }, { key: 'direction', label: 'Direction' }, { key: 'mode', label: 'Mode' }, { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' }, { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, logistics: rows })} createRow={() => ({ id: crypto.randomUUID(), lane: 'New Lane', direction: 'Inbound' as const, mode: 'Road' as const, costPerShipment: 0, unitsPerShipment: 1 })} />}
+       {activeTab === 'Maintenance' && <EditableTable title="Maintenance" rows={scenario.maintenance} columns={[{ key: 'machineType', label: 'Machine Type' }, { key: 'pmHoursPerMonth', label: 'PM hrs/mo', type: 'number' }, { key: 'sparesCostPerMonth', label: 'Spares', type: 'number' }, { key: 'serviceCostPerMonth', label: 'Service', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, maintenance: rows })} createRow={() => ({ id: crypto.randomUUID(), machineType: 'New', pmHoursPerMonth: 0, sparesCostPerMonth: 0, serviceCostPerMonth: 0 })} />}
+
+@@ -248,7 +237,6 @@ export default function App() {
+       )}
+
+-      {activeTab === 'Risk' && <EditableTable title="Risk Register" rows={scenario.risks} columns={[{ key: 'area', label: 'Area' }, { key: 'status', label: 'Status' }, { key: 'mitigation', label: 'Mitigation' }, { key: 'owner', label: 'Owner' }]} onChange={(rows) => updateScenario({ ...scenario, risks: rows })} createRow={() => ({ id: crypto.randomUUID(), area: 'New area', status: 'Amber', mitigation: '', owner: '' })} />}
+       {activeTab =
