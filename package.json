@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -16,7 +15,6 @@
     "react-dom": "^18.3.1",
     "recharts": "^2.15.1",
     "@supabase/supabase-js": "^2.49.1"
-    "recharts": "^2.15.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
