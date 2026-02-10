@@ -1,5 +1,11 @@
 import './styles.css';
 
+type ColumnType = 'text' | 'number' | 'checkbox';
+
+interface EditableTableProps<T extends { id?: string }> {
+  title: string;
+  rows: T[];
+  columns: { key: keyof T; label: string; type?: ColumnType }[];
 interface EditableTableProps<T extends Record<string, unknown>> {
   title: string;
   rows: T[];
@@ -8,6 +14,8 @@ interface EditableTableProps<T extends Record<string, unknown>> {
   createRow: () => T;
 }
 
+export function EditableTable<T extends { id?: string }>({ title, rows, columns, onChange, createRow }: EditableTableProps<T>) {
+  const updateCell = <K extends keyof T>(i: number, key: K, value: T[K]) => {
 export function EditableTable<T extends Record<string, unknown>>({ title, rows, columns, onChange, createRow }: EditableTableProps<T>) {
   const updateCell = (i: number, key: keyof T, value: unknown) => {
     const next = [...rows];
@@ -28,6 +36,18 @@ export function EditableTable<T extends Record<string, unknown>>({ title, rows, 
           </thead>
           <tbody>
             {rows.map((r, i) => (
+              <tr key={String(r.id ?? i)}>
+                {columns.map((c) => {
+                  const value = r[c.key];
+
+                  if (c.type === 'checkbox') {
+                    return (
+                      <td key={String(c.key)}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(value)}
+                          onChange={(e) => updateCell(i, c.key, e.target.checked as T[typeof c.key])}
+                        />
               <tr key={String((r.id as string | undefined) ?? i)}>
                 {columns.map((c) => {
                   const value = r[c.key];
@@ -44,6 +64,13 @@ export function EditableTable<T extends Record<string, unknown>>({ title, rows, 
                       <input
                         type={c.type === 'number' ? 'number' : 'text'}
                         value={String(value ?? '')}
+                        onChange={(e) =>
+                          updateCell(
+                            i,
+                            c.key,
+                            (c.type === 'number' ? Number(e.target.value) : e.target.value) as T[typeof c.key]
+                          )
+                        }
                         onChange={(e) => updateCell(i, c.key, c.type === 'number' ? Number(e.target.value) : e.target.value)}
                       />
                     </td>

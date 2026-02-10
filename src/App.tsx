@@ -1,9 +1,11 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { EditableTable } from './components/EditableTable';
 import { KpiCard } from './components/KpiCard';
 import './components/styles.css';
 import { computeCostBreakdown, computeTaktTimeMinutes, evaluateSixPack, machineRequirementForStation, riskScore, sixPackYieldPct } from './lib/calc';
+import { defaultState, duplicateScenario, exportScenarioJson, inventoryCsv, loadState, saveState, sixPackCsv } from './lib/store';
 import { loadState, saveState, duplicateScenario, exportScenarioJson, inventoryCsv, sixPackCsv } from './lib/store';
 import { ScenarioName } from './lib/types';
 
@@ -20,6 +22,38 @@ function downloadFile(filename: string, content: string, type: string) {
 }
 
 export default function App() {
+  const [state, setState] = useState(defaultState);
+  const [activeTab, setActiveTab] = useState(tabs[0]);
+  const [loading, setLoading] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+  const hydrated = useRef(false);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const loaded = await loadState();
+      if (mounted) {
+        setState(loaded);
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (loading || !hydrated.current) {
+      hydrated.current = true;
+      return;
+    }
+
+    setSyncStatus('syncing');
+    saveState(state)
+      .then(() => setSyncStatus('synced'))
+      .catch(() => setSyncStatus('error'));
+  }, [loading, state]);
   const [state, setState] = useState(loadState());
   const [activeTab, setActiveTab] = useState(tabs[0]);
 
@@ -44,9 +78,20 @@ export default function App() {
 
   const scenarios: ScenarioName[] = ['Pilot', 'Ramp', 'Scale'];
 
+  if (loading) {
+    return (
+      <div className="app">
+        <h1>NeoLink Global GTM Dashboard</h1>
+        <div className="card">Loading scenario data...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <h1>NeoLink Global GTM Dashboard</h1>
+
+      <div className="small">Data sync: {syncStatus}</div>
 
       <div className="header">
         <select value={state.selectedScenario} onChange={(e) => setState((s) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))}>
@@ -131,6 +176,7 @@ export default function App() {
             { key: 'singleSource', label: 'Single Source', type: 'checkbox' },
           ]}
           onChange={(rows) => updateScenario({ ...scenario, inventory: rows, auditLog: [...scenario.auditLog, 'Inventory table edited'] })}
+          createRow={() => ({ id: crypto.randomUUID(), name: 'New item', category: 'RM' as const, unitCost: 0, usagePerProduct: 1, leadTimeDays: 0, moq: 0, singleSource: false })}
           createRow={() => ({ id: crypto.randomUUID(), name: 'New item', category: 'RM', unitCost: 0, usagePerProduct: 1, leadTimeDays: 0, moq: 0, singleSource: false })}
         />
       )}
@@ -147,6 +193,8 @@ export default function App() {
         </div>
       )}
 
+      {activeTab === 'Warehouses' && <EditableTable title="Warehouse Planning" rows={scenario.warehouses} columns={[{ key: 'location', label: 'Location' }, { key: 'type', label: 'Type' }, { key: 'monthlyCost', label: 'Monthly Cost', type: 'number' }, { key: 'utilizationPct', label: 'Utilization', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, warehouses: rows })} createRow={() => ({ id: crypto.randomUUID(), location: 'New DC', type: 'FG' as const, monthlyCost: 0, utilizationPct: 0.5 })} />}
+      {activeTab === 'Logistics/Lanes' && <EditableTable title="Transport Lanes" rows={scenario.logistics} columns={[{ key: 'lane', label: 'Lane' }, { key: 'direction', label: 'Direction' }, { key: 'mode', label: 'Mode' }, { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' }, { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, logistics: rows })} createRow={() => ({ id: crypto.randomUUID(), lane: 'New Lane', direction: 'Inbound' as const, mode: 'Road' as const, costPerShipment: 0, unitsPerShipment: 1 })} />}
       {activeTab === 'Warehouses' && <EditableTable title="Warehouse Planning" rows={scenario.warehouses} columns={[{ key: 'location', label: 'Location' }, { key: 'type', label: 'Type' }, { key: 'monthlyCost', label: 'Monthly Cost', type: 'number' }, { key: 'utilizationPct', label: 'Utilization', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, warehouses: rows })} createRow={() => ({ id: crypto.randomUUID(), location: 'New DC', type: 'FG', monthlyCost: 0, utilizationPct: 0.5 })} />}
       {activeTab === 'Logistics/Lanes' && <EditableTable title="Transport Lanes" rows={scenario.logistics} columns={[{ key: 'lane', label: 'Lane' }, { key: 'direction', label: 'Direction' }, { key: 'mode', label: 'Mode' }, { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' }, { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, logistics: rows })} createRow={() => ({ id: crypto.randomUUID(), lane: 'New Lane', direction: 'Inbound', mode: 'Road', costPerShipment: 0, unitsPerShipment: 1 })} />}
       {activeTab === 'Maintenance' && <EditableTable title="Maintenance" rows={scenario.maintenance} columns={[{ key: 'machineType', label: 'Machine Type' }, { key: 'pmHoursPerMonth', label: 'PM hrs/mo', type: 'number' }, { key: 'sparesCostPerMonth', label: 'Spares', type: 'number' }, { key: 'serviceCostPerMonth', label: 'Service', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, maintenance: rows })} createRow={() => ({ id: crypto.randomUUID(), machineType: 'New', pmHoursPerMonth: 0, sparesCostPerMonth: 0, serviceCostPerMonth: 0 })} />}
@@ -166,6 +214,7 @@ export default function App() {
         </div>
       )}
 
+      {activeTab === 'Risk' && <EditableTable title="Risk Register" rows={scenario.risks} columns={[{ key: 'area', label: 'Area' }, { key: 'status', label: 'Status' }, { key: 'mitigation', label: 'Mitigation' }, { key: 'owner', label: 'Owner' }]} onChange={(rows) => updateScenario({ ...scenario, risks: rows })} createRow={() => ({ id: crypto.randomUUID(), area: 'New area', status: 'Amber' as const, mitigation: '', owner: '' })} />}
       {activeTab === 'Risk' && <EditableTable title="Risk Register" rows={scenario.risks} columns={[{ key: 'area', label: 'Area' }, { key: 'status', label: 'Status' }, { key: 'mitigation', label: 'Mitigation' }, { key: 'owner', label: 'Owner' }]} onChange={(rows) => updateScenario({ ...scenario, risks: rows })} createRow={() => ({ id: crypto.randomUUID(), area: 'New area', status: 'Amber', mitigation: '', owner: '' })} />}
       {activeTab === 'Audit/Change Log' && <div className="card"><h3>Audit Log</h3><ul>{scenario.auditLog.map((e, i) => <li key={i}>{e}</li>)}</ul></div>}
       {activeTab === 'Summary / Export' && <div className="card"><h3>Summary</h3><p>Gross margin per unit: €{cost.marginPerUnit.toFixed(2)} | Total cost per unit: €{cost.total.toFixed(2)}</p></div>}
