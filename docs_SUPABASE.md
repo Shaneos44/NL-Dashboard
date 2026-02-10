@@ -25,3 +25,6 @@ The app now attempts Supabase first, with localStorage fallback:
 - `ERROR: 42703: column "created_by" does not exist`
   - Cause: older `scenarios` table existed before the auth columns were added.
   - Fix: rerun `supabase/step2_auth_rls.sql` (it now adds/backfills required columns).
+
+
+- Store upsert conflict target is `name,created_by` to match the table unique constraint.

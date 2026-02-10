@@ -1,52 +1,52 @@
-# NeoLink Global GTM Dashboard (Revamp Starter)
+# NeoLink Global GTM Dashboard
 
-This repository contains a React + TypeScript implementation of the NeoLink GTM dashboard brief, including:
-
-- Scenario planning (Pilot/Ramp/Scale) with selector and duplication support.
-- Top KPI row (revenue, total cost/unit, margin %, takt, risk score, Six Pack yield).
-- Margin curve chart vs volume.
-- Tabbed modules for Inputs, Inventory, Machines, Warehouses, Logistics, Maintenance, Quality, Six Pack, Risk, Audit, and Summary/Export.
-- Inline editable tables with add-row behavior.
-- Formula-based cost model and throughput metrics with documented calculation comments.
-- Guardrail alerts for margin threshold, bottleneck risk, and single-source concentration.
-- Export support (JSON + CSV for inventory and Six Pack).
-- Local persistence via `localStorage` with Supabase sync support.
-- Unit tests for Six Pack logic, cost model edge conditions, and scenario duplication integrity.
-
-## Supabase connection
-
-Project URL:
-
-- `https://noxoplsorftdpmrbubid.supabase.co`
-
-Create `.env`:
-
-- `VITE_SUPABASE_URL=https://noxoplsorftdpmrbubid.supabase.co`
-- `VITE_SUPABASE_ANON_KEY=<your-anon-key>`
-
-## Step 2: Auth + RLS
-
-Run SQL from `supabase/step2_auth_rls.sql` to create a user-scoped `scenarios` table and RLS policies.
-
-## Step 3: Persistence (implemented)
-
-Implemented in code:
-
-- `src/lib/supabase.ts` creates Supabase client from env.
-- `src/lib/store.ts` now uses async load/save with local fallback and Supabase upsert.
-- `src/App.tsx` hydrates on startup and shows sync status.
-
-Detailed rollout notes: `docs_SUPABASE.md`.
-
-## Local run
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Tests
+## Required env (for Supabase sync)
+
+Create `.env` from `.env.example`:
 
 ```bash
-npm test
+cp .env.example .env
 ```
+
+Fill values:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+If env vars are missing, the app still works with localStorage fallback.
+
+## Hosting (GitHub Pages) — fully wired
+
+This repo now includes automatic deploy workflow:
+
+- `.github/workflows/deploy-pages.yml`
+- Vite `base` is set to `/NL-Dashboard/` in GitHub Actions builds.
+
+### One-time GitHub setup
+
+1. In GitHub repo settings, open **Pages**.
+2. Set **Source** to **GitHub Actions**.
+3. (Optional for Supabase at build/runtime) add repo secrets:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+
+After that, every push to `main` or `work` auto-deploys.
+
+Your site URL will be:
+
+`https://Shaneos44.github.io/NL-Dashboard/`
+
+## Supabase SQL
+
+Run:
+
+- `supabase/step2_auth_rls.sql`
+
+This script is rerunnable and upgrades older `scenarios` tables (adds/backfills `created_by`, `updated_at`, and policies).

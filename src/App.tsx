@@ -170,7 +170,7 @@ export default function App() {
             { key: 'singleSource', label: 'Single Source', type: 'checkbox' },
           ]}
           onChange={(rows) => updateScenario({ ...scenario, inventory: rows, auditLog: [...scenario.auditLog, 'Inventory table edited'] })}
-          createRow={() => ({ id: crypto.randomUUID(), name: 'New item', category: 'RM', unitCost: 0, usagePerProduct: 1, leadTimeDays: 0, moq: 0, singleSource: false })}
+          createRow={() => ({ id: crypto.randomUUID(), name: 'New item', category: 'RM' as const, unitCost: 0, usagePerProduct: 1, leadTimeDays: 0, moq: 0, singleSource: false })}
         />
       )}
 
@@ -186,8 +186,8 @@ export default function App() {
         </div>
       )}
 
-      {activeTab === 'Warehouses' && <EditableTable title="Warehouse Planning" rows={scenario.warehouses} columns={[{ key: 'location', label: 'Location' }, { key: 'type', label: 'Type' }, { key: 'monthlyCost', label: 'Monthly Cost', type: 'number' }, { key: 'utilizationPct', label: 'Utilization', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, warehouses: rows })} createRow={() => ({ id: crypto.randomUUID(), location: 'New DC', type: 'FG', monthlyCost: 0, utilizationPct: 0.5 })} />}
-      {activeTab === 'Logistics/Lanes' && <EditableTable title="Transport Lanes" rows={scenario.logistics} columns={[{ key: 'lane', label: 'Lane' }, { key: 'direction', label: 'Direction' }, { key: 'mode', label: 'Mode' }, { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' }, { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, logistics: rows })} createRow={() => ({ id: crypto.randomUUID(), lane: 'New Lane', direction: 'Inbound', mode: 'Road', costPerShipment: 0, unitsPerShipment: 1 })} />}
+      {activeTab === 'Warehouses' && <EditableTable title="Warehouse Planning" rows={scenario.warehouses} columns={[{ key: 'location', label: 'Location' }, { key: 'type', label: 'Type' }, { key: 'monthlyCost', label: 'Monthly Cost', type: 'number' }, { key: 'utilizationPct', label: 'Utilization', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, warehouses: rows })} createRow={() => ({ id: crypto.randomUUID(), location: 'New DC', type: 'FG' as const, monthlyCost: 0, utilizationPct: 0.5 })} />}
+      {activeTab === 'Logistics/Lanes' && <EditableTable title="Transport Lanes" rows={scenario.logistics} columns={[{ key: 'lane', label: 'Lane' }, { key: 'direction', label: 'Direction' }, { key: 'mode', label: 'Mode' }, { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' }, { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, logistics: rows })} createRow={() => ({ id: crypto.randomUUID(), lane: 'New Lane', direction: 'Inbound' as const, mode: 'Road' as const, costPerShipment: 0, unitsPerShipment: 1 })} />}
       {activeTab === 'Maintenance' && <EditableTable title="Maintenance" rows={scenario.maintenance} columns={[{ key: 'machineType', label: 'Machine Type' }, { key: 'pmHoursPerMonth', label: 'PM hrs/mo', type: 'number' }, { key: 'sparesCostPerMonth', label: 'Spares', type: 'number' }, { key: 'serviceCostPerMonth', label: 'Service', type: 'number' }]} onChange={(rows) => updateScenario({ ...scenario, maintenance: rows })} createRow={() => ({ id: crypto.randomUUID(), machineType: 'New', pmHoursPerMonth: 0, sparesCostPerMonth: 0, serviceCostPerMonth: 0 })} />}
 
       {activeTab === 'Quality' && <div className="card"><h3>Quality module</h3><p>Includes quality cost in total cost model and Six Pack capability checks.</p></div>}
@@ -205,7 +205,7 @@ export default function App() {
         </div>
       )}
 
-      {activeTab === 'Risk' && <EditableTable title="Risk Register" rows={scenario.risks} columns={[{ key: 'area', label: 'Area' }, { key: 'status', label: 'Status' }, { key: 'mitigation', label: 'Mitigation' }, { key: 'owner', label: 'Owner' }]} onChange={(rows) => updateScenario({ ...scenario, risks: rows })} createRow={() => ({ id: crypto.randomUUID(), area: 'New area', status: 'Amber', mitigation: '', owner: '' })} />}
+      {activeTab === 'Risk' && <EditableTable title="Risk Register" rows={scenario.risks} columns={[{ key: 'area', label: 'Area' }, { key: 'status', label: 'Status' }, { key: 'mitigation', label: 'Mitigation' }, { key: 'owner', label: 'Owner' }]} onChange={(rows) => updateScenario({ ...scenario, risks: rows })} createRow={() => ({ id: crypto.randomUUID(), area: 'New area', status: 'Amber' as const, mitigation: '', owner: '' })} />}
       {activeTab === 'Audit/Change Log' && <div className="card"><h3>Audit Log</h3><ul>{scenario.auditLog.map((e, i) => <li key={i}>{e}</li>)}</ul></div>}
       {activeTab === 'Summary / Export' && <div className="card"><h3>Summary</h3><p>Gross margin per unit: €{cost.marginPerUnit.toFixed(2)} | Total cost per unit: €{cost.total.toFixed(2)}</p></div>}
     </div>

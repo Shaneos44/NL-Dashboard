@@ -1,15 +1,17 @@
 import './styles.css';
 
-interface EditableTableProps<T extends Record<string, unknown>> {
+type ColumnType = 'text' | 'number' | 'checkbox';
+
+interface EditableTableProps<T extends { id?: string }> {
   title: string;
   rows: T[];
-  columns: { key: keyof T; label: string; type?: 'text' | 'number' | 'checkbox' }[];
+  columns: { key: keyof T; label: string; type?: ColumnType }[];
   onChange: (rows: T[]) => void;
   createRow: () => T;
 }
 
-export function EditableTable<T extends Record<string, unknown>>({ title, rows, columns, onChange, createRow }: EditableTableProps<T>) {
-  const updateCell = (i: number, key: keyof T, value: unknown) => {
+export function EditableTable<T extends { id?: string }>({ title, rows, columns, onChange, createRow }: EditableTableProps<T>) {
+  const updateCell = <K extends keyof T>(i: number, key: K, value: T[K]) => {
     const next = [...rows];
     next[i] = { ...next[i], [key]: value };
     onChange(next);
@@ -28,13 +30,18 @@ export function EditableTable<T extends Record<string, unknown>>({ title, rows, 
           </thead>
           <tbody>
             {rows.map((r, i) => (
-              <tr key={String((r.id as string | undefined) ?? i)}>
+              <tr key={String(r.id ?? i)}>
                 {columns.map((c) => {
                   const value = r[c.key];
+
                   if (c.type === 'checkbox') {
                     return (
                       <td key={String(c.key)}>
-                        <input type="checkbox" checked={Boolean(value)} onChange={(e) => updateCell(i, c.key, e.target.checked)} />
+                        <input
+                          type="checkbox"
+                          checked={Boolean(value)}
+                          onChange={(e) => updateCell(i, c.key, e.target.checked as T[typeof c.key])}
+                        />
                       </td>
                     );
                   }
@@ -44,7 +51,13 @@ export function EditableTable<T extends Record<string, unknown>>({ title, rows, 
                       <input
                         type={c.type === 'number' ? 'number' : 'text'}
                         value={String(value ?? '')}
-                        onChange={(e) => updateCell(i, c.key, c.type === 'number' ? Number(e.target.value) : e.target.value)}
+                        onChange={(e) =>
+                          updateCell(
+                            i,
+                            c.key,
+                            (c.type === 'number' ? Number(e.target.value) : e.target.value) as T[typeof c.key]
+                          )
+                        }
                       />
                     </td>
                   );

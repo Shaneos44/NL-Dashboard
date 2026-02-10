@@ -71,7 +71,7 @@ async function upsertScenario(row: ScenarioRow): Promise<void> {
       payload: row.payload,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: 'name' }
+    { onConflict: 'name,created_by' }
   );
 }
 
