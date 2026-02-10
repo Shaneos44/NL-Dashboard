@@ -1,136 +1,94 @@
-import { defaultScenarios } from './data';
-import { supabase } from './supabase';
-import { ScenarioData, ScenarioName } from './types';
+import './styles.css';
 
-const STORAGE_KEY = 'neolink-gtm-dashboard-v1';
-const SCENARIO_TABLE = 'scenarios';
+type ColumnType = 'text' | 'number' | 'checkbox';
 
-export interface AppState {
-  selectedScenario: ScenarioName;
-  scenarios: Record<ScenarioName, ScenarioData>;
-}
-
-interface ScenarioRow {
-  name: ScenarioName;
-  payload: ScenarioData;
-}
-
-export const defaultState: AppState = {
-  selectedScenario: 'Pilot',
-  scenarios: defaultScenarios,
+type ColumnDef<T> = {
+  key: keyof T;
+  label: string;
+  type?: ColumnType;
 };
 
-function loadStateLocal(): AppState {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return defaultState;
-
-  try {
-    return JSON.parse(raw) as AppState;
-  } catch {
-    return defaultState;
-  }
+interface EditableTableProps<T extends { id?: string }> {
+  title: string;
+  rows: T[];
+  columns: ColumnDef<T>[];
+  onChange: (rows: T[]) => void;
+  createRow: () => T;
 }
 
-function saveStateLocal(state: AppState): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
-export async function loadState(): Promise<AppState> {
-  const local = loadStateLocal();
-  if (!supabase) return local;
-
-  const { data, error } = await supabase
-    .from(SCENARIO_TABLE)
-    .select('name,payload')
-    .in('name', ['Pilot', 'Ramp', 'Scale']);
-
-  if (error || !data || data.length === 0) return local;
-
-  const scenarios = structuredClone(local.scenarios);
-  for (const row of data as ScenarioRow[]) {
-    scenarios[row.name] = row.payload;
-  }
-
-  return { selectedScenario: local.selectedScenario, scenarios };
-}
-
-async function upsertScenario(row: ScenarioRow): Promise<void> {
-  if (!supabase) return;
-
-  await supabase.from(SCENARIO_TABLE).upsert(
-    {
-      name: row.name,
-      payload: row.payload,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'name,created_by' }
-  );
-}
-
-export async function saveState(state: AppState): Promise<void> {
-  saveStateLocal(state);
-  if (!supabase) return;
-
-  await Promise.all(
-    (Object.keys(state.scenarios) as ScenarioName[]).map((name) =>
-      upsertScenario({ name, payload: state.scenarios[name] })
-    )
-  );
-}
-
-/** Utilities used by App.tsx and tests */
-export function duplicateScenario(
-  state: AppState,
-  source: ScenarioName,
-  target: ScenarioName
-): AppState {
-  const next = structuredClone(state) as AppState;
-  next.scenarios[target] = {
-    ...structuredClone(state.scenarios[source]),
-    name: target,
-    auditLog: [
-      ...state.scenarios[source].auditLog,
-      `Duplicated from ${source} at ${new Date().toISOString()}`,
-    ],
+export function EditableTable<T extends { id?: string }>({
+  title,
+  rows,
+  columns,
+  onChange,
+  createRow,
+}: EditableTableProps<T>) {
+  const updateCell = (rowIndex: number, key: keyof T, value: unknown) => {
+    const next = [...rows];
+    next[rowIndex] = { ...(next[rowIndex] as any), [key]: value } as T;
+    onChange(next);
   };
-  return next;
-}
 
-export function exportScenarioJson(s: ScenarioData): string {
-  return JSON.stringify(s, null, 2);
-}
+  return (
+    <div className="card">
+      <div className="section-header">
+        <h3>{title}</h3>
+        <button onClick={() => onChange([...rows, createRow()])}>Add row</button>
+      </div>
 
-export function inventoryCsv(s: ScenarioData): string {
-  const header =
-    'id,name,category,unitCost,usagePerProduct,leadTimeDays,moq,singleSource';
-  const rows = s.inventory.map((i) =>
-    [
-      i.id,
-      i.name,
-      i.category,
-      i.unitCost,
-      i.usagePerProduct,
-      i.leadTimeDays,
-      i.moq,
-      i.singleSource,
-    ].join(',')
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              {columns.map((c) => (
+                <th key={String(c.key)}>{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={String(r.id ?? i)}>
+                {columns.map((c) => {
+                  const value = (r as any)[c.key];
+
+                  if (c.type === 'checkbox') {
+                    return (
+                      <td key={String(c.key)}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(value)}
+                          onChange={(e) =>
+                            updateCell(i, c.key, e.target.checked)
+                          }
+                        />
+                      </td>
+                    );
+                  }
+
+                  const isNumber = c.type === 'number';
+
+                  return (
+                    <td key={String(c.key)}>
+                      <input
+                        type={isNumber ? 'number' : 'text'}
+                        value={value == null ? '' : String(value)}
+                        onChange={(e) =>
+                          updateCell(
+                            i,
+                            c.key,
+                            isNumber ? Number(e.target.value) : e.target.value
+                          )
+                        }
+                      />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
-  return [header, ...rows].join('\n');
-}
-
-export function sixPackCsv(s: ScenarioData): string {
-  const header = 'id,metric,mode,mean,stdDev,lsl,usl,flaggedPass';
-  const rows = s.sixPack.map((r) =>
-    [
-      r.id,
-      r.metric,
-      r.mode,
-      r.mean,
-      r.stdDev,
-      r.lsl,
-      r.usl,
-      r.flaggedPass ?? '',
-    ].join(',')
-  );
-  return [header, ...rows].join('\n');
 }
