@@ -7,19 +7,15 @@ import {
   computeCostBreakdown,
   computeTaktTimeMinutes,
   evaluateSixPack,
-  machineRequirementForStation,
   riskScore,
   sixPackYieldPct,
+  computeStationCapacity,
+  bottleneckStation,
+  fteRequired,
+  computeInventoryExposure,
+  inventoryExposureTotals,
+  logisticsSummary,
 } from './lib/calc';
-import {
-  defaultState,
-  duplicateScenario,
-  exportScenarioJson,
-  inventoryCsv,
-  loadState,
-  saveState,
-  sixPackCsv,
-} from './lib/store';
 import { ScenarioName } from './lib/types';
 
 const tabs = [
@@ -86,6 +82,12 @@ export default function App() {
   const takt = useMemo(() => computeTaktTimeMinutes(scenario), [scenario]);
   const sixYield = useMemo(() => sixPackYieldPct(scenario), [scenario]);
   const score = useMemo(() => riskScore(scenario, cost.marginPct), [scenario, cost.marginPct]);
+  const capacityRows = useMemo(() => computeStationCapacity(scenario), [scenario]);
+const bottleneck = useMemo(() => bottleneckStation(scenario), [scenario]);
+const fte = useMemo(() => fteRequired(scenario), [scenario]);
+const invExposure = useMemo(() => computeInventoryExposure(scenario), [scenario]);
+const invTotals = useMemo(() => inventoryExposureTotals(scenario), [scenario]);
+const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
 
   const updateScenario = (next: typeof scenario) => {
     setState((s) => ({ ...s, scenarios: { ...s.scenarios, [s.selectedScenario]: next } }));
@@ -220,39 +222,116 @@ export default function App() {
         </div>
       )}
 
-      {activeTab === 'Processes' && (
-        <div className="card">
-          <h3>Process Throughput</h3>
-          <p>Cycle time, OEE and bottleneck shown in Machines tab with machine requirement estimates.</p>
-        </div>
-      )}
+     {activeTab === 'Processes' && (
+  <div className="card">
+    <h3>Capacity & Bottleneck</h3>
+
+    {bottleneck && (
+      <div className="small">
+        Bottleneck: <b>{bottleneck.station}</b> ({bottleneck.utilizationPct.toFixed(1)}% utilization)
+      </div>
+    )}
+
+    <table>
+      <thead>
+        <tr>
+          <th>Station</th>
+          <th>Cycle (s)</th>
+          <th>Installed</th>
+          <th>Capacity/mo</th>
+          <th>Util %</th>
+          <th>Req Machines</th>
+          <th>Shortfall</th>
+        </tr>
+      </thead>
+      <tbody>
+        {capacityRows.map((r) => (
+          <tr key={r.station}>
+            <td>{r.station}</td>
+            <td>{r.cycleTimeSec}</td>
+            <td>{r.installed}</td>
+            <td>{Math.round(r.capacityUnitsPerMonth).toLocaleString()}</td>
+            <td>{r.utilizationPct.toFixed(1)}%</td>
+            <td>{r.requiredMachines.toFixed(2)}</td>
+            <td>{r.shortfallMachines > 0 ? `+${r.shortfallMachines.toFixed(2)}` : '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+
+    <div className="small" style={{ marginTop: 12 }}>
+      Staffing estimate (FTE): <b>{fte.toFixed(2)}</b> (based on labour min/unit and available minutes/month)
+    </div>
+  </div>
+)}
 
       {activeTab === 'Inventory' && (
-        <EditableTable
-          title="Inventory & BOM"
-          rows={scenario.inventory}
-          columns={[
-            { key: 'name', label: 'Item' },
-            { key: 'category', label: 'Category' },
-            { key: 'unitCost', label: 'Unit Cost', type: 'number' },
-            { key: 'usagePerProduct', label: 'Usage/Product', type: 'number' },
-            { key: 'leadTimeDays', label: 'Lead Time (d)', type: 'number' },
-            { key: 'moq', label: 'MOQ', type: 'number' },
-            { key: 'singleSource', label: 'Single Source', type: 'checkbox' },
-          ]}
-          onChange={(rows) => updateScenario({ ...scenario, inventory: rows, auditLog: [...scenario.auditLog, 'Inventory table edited'] })}
-          createRow={() => ({
-            id: crypto.randomUUID(),
-            name: 'New item',
-            category: 'RM' as const,
-            unitCost: 0,
-            usagePerProduct: 1,
-            leadTimeDays: 0,
-            moq: 0,
-            singleSource: false,
-          })}
-        />
-      )}
+  <div>
+    <div className="card small">
+      <h3>Inventory Exposure (Cash Tied Up)</h3>
+      <ul>
+        <li>Pipeline value: €{Math.round(invTotals.pipelineValue).toLocaleString()}</li>
+        <li>Safety stock value: €{Math.round(invTotals.safetyStockValue).toLocaleString()}</li>
+        <li>
+          <b>Total exposure: €{Math.round(invTotals.total).toLocaleString()}</b>
+        </li>
+      </ul>
+    </div>
+
+    <div className="card">
+      <h3>Reorder Points (units)</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Lead Time (d)</th>
+            <th>ROP (units)</th>
+            <th>Pipeline €</th>
+            <th>SS €</th>
+          </tr>
+        </thead>
+        <tbody>
+          {invExposure.map((r) => (
+            <tr key={r.item}>
+              <td>{r.item}</td>
+              <td>{r.leadTimeDays}</td>
+              <td>{Math.round(r.reorderPointUnits).toLocaleString()}</td>
+              <td>€{Math.round(r.pipelineValue).toLocaleString()}</td>
+              <td>€{Math.round(r.safetyStockValue).toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    <EditableTable
+      title="Inventory & BOM"
+      rows={scenario.inventory}
+      columns={[
+        { key: 'name', label: 'Item' },
+        { key: 'category', label: 'Category' },
+        { key: 'unitCost', label: 'Unit Cost', type: 'number' },
+        { key: 'usagePerProduct', label: 'Usage/Product', type: 'number' },
+        { key: 'leadTimeDays', label: 'Lead Time (d)', type: 'number' },
+        { key: 'moq', label: 'MOQ', type: 'number' },
+        { key: 'singleSource', label: 'Single Source', type: 'checkbox' },
+      ]}
+      onChange={(rows) =>
+        updateScenario({ ...scenario, inventory: rows, auditLog: [...scenario.auditLog, 'Inventory table edited'] })
+      }
+      createRow={() => ({
+        id: crypto.randomUUID(),
+        name: 'New item',
+        category: 'RM' as const,
+        unitCost: 0,
+        usagePerProduct: 1,
+        leadTimeDays: 0,
+        moq: 0,
+        singleSource: false,
+      })}
+    />
+  </div>
+)}
 
       {activeTab === 'Machines' && (
         <div className="card">
@@ -292,27 +371,51 @@ export default function App() {
       )}
 
       {activeTab === 'Logistics/Lanes' && (
-        <EditableTable
-          title="Transport Lanes"
-          rows={scenario.logistics}
-          columns={[
-            { key: 'lane', label: 'Lane' },
-            { key: 'direction', label: 'Direction' },
-            { key: 'mode', label: 'Mode' },
-            { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' },
-            { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' },
-          ]}
-          onChange={(rows) => updateScenario({ ...scenario, logistics: rows })}
-          createRow={() => ({
-            id: crypto.randomUUID(),
-            lane: 'New Lane',
-            direction: 'Inbound' as const,
-            mode: 'Road' as const,
-            costPerShipment: 0,
-            unitsPerShipment: 1,
-          })}
-        />
-      )}
+  <div>
+    <div className="card">
+      <h3>Lane Summary</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Lane</th>
+            <th>Shipments/mo</th>
+            <th>Cost/unit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {laneSummary.map((l) => (
+            <tr key={l.lane}>
+              <td>{l.lane}</td>
+              <td>{l.shipmentsPerMonth.toFixed(2)}</td>
+              <td>€{l.costPerUnit.toFixed(2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    <EditableTable
+      title="Transport Lanes"
+      rows={scenario.logistics}
+      columns={[
+        { key: 'lane', label: 'Lane' },
+        { key: 'direction', label: 'Direction' },
+        { key: 'mode', label: 'Mode' },
+        { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' },
+        { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' },
+      ]}
+      onChange={(rows) => updateScenario({ ...scenario, logistics: rows })}
+      createRow={() => ({
+        id: crypto.randomUUID(),
+        lane: 'New Lane',
+        direction: 'Inbound' as const,
+        mode: 'Road' as const,
+        costPerShipment: 0,
+        unitsPerShipment: 1,
+      })}
+    />
+  </div>
+)}
 
       {activeTab === 'Maintenance' && (
         <EditableTable
