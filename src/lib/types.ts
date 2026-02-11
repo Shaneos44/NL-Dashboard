@@ -1,31 +1,36 @@
 export type ScenarioName = 'Pilot' | 'Ramp' | 'Scale';
 
+export interface PlanningDecision {
+  id: string;
+  title: string;          // e.g. "How many machines & when?"
+  target: string;         // e.g. "No capacity shortfall for next 6 months"
+  owner: string;          // optional
+  status: 'Not started' | 'In progress' | 'Blocked' | 'Done';
+  notes: string;          // free text
+}
+
 export interface GlobalInputs {
+  // NOTE: currency is AUD (display only)
   salePricePerUnit: number;
   monthlyDemand: number;
 
-  // time/capacity model
   availableMinutesPerMonth: number;
   oee: number;
   downtimePct: number;
 
-  // labour model
   labourRatePerHour: number;
   labourMinutesPerUnit: number;
 
-  // quality / yield
   qualityCostPerUnit: number;
-  scrapRatePct?: number; // % of demand extra to cover scrap/rework, e.g. 0.05 = 5%
 
-  // finance
+  scrapRatePct?: number;           // 0.05 = 5%
+  overheadPct?: number;            // 0.25 = 25%
+  holdingRatePctAnnual?: number;   // 0.24 = 24%
+  safetyStockDays?: number;        // e.g. 14
+
   capexTotal: number;
   depreciationMonths: number;
   marginGuardrailPct: number;
-  overheadPct?: number; // % add-on to labour as overhead burden, e.g. 0.25 = 25%
-  holdingRatePctAnnual?: number; // annual inventory holding rate, e.g. 0.24 = 24%
-
-  // inventory policy (used for exposure + reorder points)
-  safetyStockDays?: number; // e.g. 14
 }
 
 export interface InventoryItem {
@@ -61,7 +66,7 @@ export interface Warehouse {
   type: 'FG' | 'RM';
   monthlyCost: number;
   utilizationPct: number;
-  capacityPctLimit?: number; // e.g. 0.85 alert threshold
+  capacityPctLimit?: number;
 }
 
 export interface MaintenanceAsset {
@@ -93,7 +98,9 @@ export interface SixPackInput {
 
 export interface ScenarioData {
   name: ScenarioName;
+  decisions: PlanningDecision[]; // YOUR editable top 3 decisions + tracking
   inputs: GlobalInputs;
+
   inventory: InventoryItem[];
   logistics: LogisticsLane[];
   machines: MachineStation[];
@@ -101,5 +108,6 @@ export interface ScenarioData {
   maintenance: MaintenanceAsset[];
   risks: RiskEntry[];
   sixPack: SixPackInput[];
+
   auditLog: string[];
 }
