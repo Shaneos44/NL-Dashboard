@@ -2,28 +2,56 @@ import { ScenarioData, ScenarioName } from './types';
 
 const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
   name,
+
+  // REQUIRED (because types.ts now requires it)
+  decisions: [
+    {
+      id: 'd1',
+      title: 'Capacity: how many machines & when?',
+      target: 'No station > 85% utilization at target demand',
+      owner: '',
+      status: 'Not started',
+      notes: '',
+    },
+    {
+      id: 'd2',
+      title: 'People: how many FTE & what roles?',
+      target: 'Staffing plan supports ramp without overtime risk',
+      owner: '',
+      status: 'Not started',
+      notes: '',
+    },
+    {
+      id: 'd3',
+      title: 'Supply chain: what to order & when?',
+      target: 'No stockouts with defined safety stock policy',
+      owner: '',
+      status: 'Not started',
+      notes: '',
+    },
+  ],
+
   inputs: {
-    salePricePerUnit: 240,
+    salePricePerUnit: 390, // AUD
     monthlyDemand: demand,
+
     availableMinutesPerMonth: 22 * 8 * 60,
-
-    labourRatePerHour: 28,
-    labourMinutesPerUnit: 18,
-
-    qualityCostPerUnit: 4.2,
-
     oee: name === 'Pilot' ? 0.62 : name === 'Ramp' ? 0.74 : 0.83,
     downtimePct: name === 'Pilot' ? 0.18 : name === 'Ramp' ? 0.12 : 0.08,
 
-    capexTotal: 1200000,
-    depreciationMonths: 60,
-    marginGuardrailPct: 25,
+    labourRatePerHour: 42, // AUD/hr
+    labourMinutesPerUnit: 18,
 
-    // new “not filler” knobs used by calc.ts
+    qualityCostPerUnit: 6.5, // AUD/unit
+
     scrapRatePct: name === 'Pilot' ? 0.06 : name === 'Ramp' ? 0.03 : 0.015,
     overheadPct: 0.25,
     holdingRatePctAnnual: 0.24,
     safetyStockDays: name === 'Pilot' ? 21 : 14,
+
+    capexTotal: 1400000, // AUD
+    depreciationMonths: 60,
+    marginGuardrailPct: 25,
   },
 
   inventory: [
@@ -31,7 +59,7 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
       id: 'i1',
       name: 'Core PCB',
       category: 'Component',
-      unitCost: 35,
+      unitCost: 58,
       usagePerProduct: 1,
       leadTimeDays: 35,
       moq: 500,
@@ -41,7 +69,7 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
       id: 'i2',
       name: 'Housing',
       category: 'RM',
-      unitCost: 16,
+      unitCost: 24,
       usagePerProduct: 1,
       leadTimeDays: 21,
       moq: 800,
@@ -51,7 +79,7 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
       id: 'i3',
       name: 'Packaging Kit',
       category: 'Packaging',
-      unitCost: 4,
+      unitCost: 6.2,
       usagePerProduct: 1,
       leadTimeDays: 14,
       moq: 1000,
@@ -62,18 +90,18 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
   logistics: [
     {
       id: 'l1',
-      lane: 'Shenzhen -> Rotterdam',
+      lane: 'Asia -> AU DC',
       direction: 'Inbound',
       mode: 'Sea',
-      costPerShipment: 3200,
+      costPerShipment: 5200,
       unitsPerShipment: 2400,
     },
     {
       id: 'l2',
-      lane: 'NL Plant -> EU Dist',
+      lane: 'AU DC -> Customers',
       direction: 'Outbound',
       mode: 'Road',
-      costPerShipment: 700,
+      costPerShipment: 950,
       unitsPerShipment: 900,
     },
   ],
@@ -85,22 +113,8 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
   ],
 
   warehouses: [
-    {
-      id: 'w1',
-      location: 'Eindhoven RM Hub',
-      type: 'RM',
-      monthlyCost: 15000,
-      utilizationPct: 0.71,
-      capacityPctLimit: 0.85,
-    },
-    {
-      id: 'w2',
-      location: 'Venlo FG DC',
-      type: 'FG',
-      monthlyCost: 18000,
-      utilizationPct: 0.76,
-      capacityPctLimit: 0.85,
-    },
+    { id: 'w1', location: 'RM Hub', type: 'RM', monthlyCost: 18000, utilizationPct: 0.71, capacityPctLimit: 0.85 },
+    { id: 'w2', location: 'FG DC', type: 'FG', monthlyCost: 22000, utilizationPct: 0.76, capacityPctLimit: 0.85 },
   ],
 
   maintenance: [
@@ -109,8 +123,8 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
   ],
 
   risks: [
-    { id: 'r1', area: 'Supply', status: 'Amber', mitigation: 'Dual-source PCB qualification', owner: 'Sourcing Lead' },
-    { id: 'r2', area: 'Quality', status: 'Green', mitigation: 'SPC on line-side torque', owner: 'Quality Manager' },
+    { id: 'r1', area: 'Supply', status: 'Amber', mitigation: 'Dual-source PCB qualification', owner: '' },
+    { id: 'r2', area: 'Quality', status: 'Green', mitigation: 'SPC on line-side torque', owner: '' },
   ],
 
   sixPack: [
