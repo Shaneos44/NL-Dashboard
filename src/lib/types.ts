@@ -141,6 +141,8 @@ export interface ProductionRun {
 
   notes: string;
   observations: string; // “what we saw”
+
+   consumptionOverrides: string;
 }
 
 export interface ScenarioData {
