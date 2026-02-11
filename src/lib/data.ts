@@ -142,6 +142,7 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
       status: 'Planned',
       notes: '',
       observations: '',
+      consumptionOverrides: '',
     },
   ],
 
