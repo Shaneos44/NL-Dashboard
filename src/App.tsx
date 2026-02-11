@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+import './components/styles.css';
 import { EditableTable } from './components/EditableTable';
 import { KpiCard } from './components/KpiCard';
-import './components/styles.css';
+
+import type { GlobalInputs, ScenarioName } from './lib/types';
+import type { AppState } from './lib/store';
+
 import {
   computeCostBreakdown,
   computeTaktTimeMinutes,
@@ -16,7 +21,16 @@ import {
   inventoryExposureTotals,
   logisticsSummary,
 } from './lib/calc';
-import { ScenarioName } from './lib/types';
+
+import {
+  defaultState,
+  loadState,
+  saveState,
+  duplicateScenario,
+  exportScenarioJson,
+  inventoryCsv,
+  sixPackCsv,
+} from './lib/store';
 
 const tabs = [
   'Inputs',
@@ -31,7 +45,7 @@ const tabs = [
   'Risk',
   'Audit/Change Log',
   'Summary / Export',
-];
+] as const;
 
 function downloadFile(filename: string, content: string, type: string) {
   const blob = new Blob([content], { type });
@@ -44,8 +58,8 @@ function downloadFile(filename: string, content: string, type: string) {
 }
 
 export default function App() {
-  const [state, setState] = useState(defaultState);
-  const [activeTab, setActiveTab] = useState(tabs[0]);
+  const [state, setState] = useState<AppState>(defaultState);
+  const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>(tabs[0]);
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
   const hydrated = useRef(false);
@@ -78,27 +92,37 @@ export default function App() {
   }, [loading, state]);
 
   const scenario = state.scenarios[state.selectedScenario];
+
   const cost = useMemo(() => computeCostBreakdown(scenario), [scenario]);
   const takt = useMemo(() => computeTaktTimeMinutes(scenario), [scenario]);
   const sixYield = useMemo(() => sixPackYieldPct(scenario), [scenario]);
   const score = useMemo(() => riskScore(scenario, cost.marginPct), [scenario, cost.marginPct]);
+
   const capacityRows = useMemo(() => computeStationCapacity(scenario), [scenario]);
-const bottleneck = useMemo(() => bottleneckStation(scenario), [scenario]);
-const fte = useMemo(() => fteRequired(scenario), [scenario]);
-const invExposure = useMemo(() => computeInventoryExposure(scenario), [scenario]);
-const invTotals = useMemo(() => inventoryExposureTotals(scenario), [scenario]);
-const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
+  const bottleneck = useMemo(() => bottleneckStation(scenario), [scenario]);
+  const fte = useMemo(() => fteRequired(scenario), [scenario]);
+  const invExposure = useMemo(() => computeInventoryExposure(scenario), [scenario]);
+  const invTotals = useMemo(() => inventoryExposureTotals(scenario), [scenario]);
+  const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
+
+  const hasCapacityShortfall = capacityRows.some((r) => r.shortfallMachines > 0.0001);
+  const singleSourceCount = scenario.inventory.filter((i) => i.singleSource).length;
 
   const updateScenario = (next: typeof scenario) => {
-    setState((s) => ({ ...s, scenarios: { ...s.scenarios, [s.selectedScenario]: next } }));
+    setState((s: AppState) => ({
+      ...s,
+      scenarios: { ...s.scenarios, [s.selectedScenario]: next },
+    }));
   };
 
-  const marginCurve = [0.5, 0.75, 1, 1.25, 1.5].map((mult) => {
-    const demand = Math.round(scenario.inputs.monthlyDemand * mult);
-    const tmp = { ...scenario, inputs: { ...scenario.inputs, monthlyDemand: demand } };
-    const res = computeCostBreakdown(tmp);
-    return { volume: demand, marginPct: Number(res.marginPct.toFixed(1)) };
-  });
+  const marginCurve = useMemo(() => {
+    return [0.5, 0.75, 1, 1.25, 1.5].map((mult) => {
+      const demand = Math.round(scenario.inputs.monthlyDemand * mult);
+      const tmp = { ...scenario, inputs: { ...scenario.inputs, monthlyDemand: demand } };
+      const res = computeCostBreakdown(tmp);
+      return { volume: demand, marginPct: Number(res.marginPct.toFixed(1)) };
+    });
+  }, [scenario]);
 
   const scenarios: ScenarioName[] = ['Pilot', 'Ramp', 'Scale'];
 
@@ -111,6 +135,8 @@ const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
     );
   }
 
+  const inputKeys = Object.keys(scenario.inputs) as (keyof GlobalInputs)[];
+
   return (
     <div className="app">
       <h1>NeoLink Global GTM Dashboard</h1>
@@ -120,7 +146,9 @@ const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
       <div className="header">
         <select
           value={state.selectedScenario}
-          onChange={(e) => setState((s) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))}
+          onChange={(e) =>
+            setState((s: AppState) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))
+          }
         >
           {scenarios.map((n) => (
             <option key={n} value={n}>
@@ -131,12 +159,9 @@ const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
 
         <button
           onClick={() => {
-            const next = duplicateScenario(
-              state,
-              state.selectedScenario,
-              state.selectedScenario === 'Pilot' ? 'Ramp' : 'Scale'
-            );
-            setState(next);
+            const target: ScenarioName =
+              state.selectedScenario === 'Pilot' ? 'Ramp' : state.selectedScenario === 'Ramp' ? 'Scale' : 'Pilot';
+            setState(duplicateScenario(state, state.selectedScenario, target));
           }}
         >
           Duplicate Scenario
@@ -145,9 +170,7 @@ const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
         <button onClick={() => downloadFile(`${scenario.name}.json`, exportScenarioJson(scenario), 'application/json')}>
           Export JSON
         </button>
-        <button
-          onClick={() => downloadFile(`${scenario.name}-inventory.csv`, inventoryCsv(scenario), 'text/csv')}
-        >
+        <button onClick={() => downloadFile(`${scenario.name}-inventory.csv`, inventoryCsv(scenario), 'text/csv')}>
           Export Inventory CSV
         </button>
         <button onClick={() => downloadFile(`${scenario.name}-sixpack.csv`, sixPackCsv(scenario), 'text/csv')}>
@@ -156,9 +179,16 @@ const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
       </div>
 
       <div className="kpis">
-        <KpiCard label="Revenue / mo" value={`€${(scenario.inputs.salePricePerUnit * scenario.inputs.monthlyDemand).toLocaleString()}`} />
+        <KpiCard
+          label="Revenue / mo"
+          value={`€${(scenario.inputs.salePricePerUnit * scenario.inputs.monthlyDemand).toLocaleString()}`}
+        />
         <KpiCard label="Total cost / unit" value={`€${cost.total.toFixed(2)}`} />
-        <KpiCard label="Margin %" value={`${cost.marginPct.toFixed(1)}%`} tone={cost.marginPct > scenario.inputs.marginGuardrailPct ? 'good' : 'bad'} />
+        <KpiCard
+          label="Margin %"
+          value={`${cost.marginPct.toFixed(1)}%`}
+          tone={cost.marginPct > scenario.inputs.marginGuardrailPct ? 'good' : 'bad'}
+        />
         <KpiCard label="Takt time" value={`${takt.toFixed(2)} min`} tone={takt > 0.4 ? 'warn' : 'good'} />
         <KpiCard label="Risk score" value={String(score)} tone={score > 60 ? 'bad' : score > 35 ? 'warn' : 'good'} />
         <KpiCard label="Six Pack yield" value={`${sixYield.toFixed(1)}%`} tone={sixYield > 80 ? 'good' : 'warn'} />
@@ -184,9 +214,14 @@ const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
           <h3>Guardrail Alerts</h3>
           <ul>
             <li>Margin threshold: {cost.marginPct < scenario.inputs.marginGuardrailPct ? '🔴 breached' : '🟢 healthy'}</li>
-            <li>Bottleneck: {scenario.machines.some((m) => machineRequirementForStation(scenario, m.cycleTimeSec) > m.machinesInstalled) ? '🔴 capacity risk' : '🟢 adequate'}</li>
-            <li>Single-source critical items: {scenario.inventory.filter((i) => i.singleSource).length}</li>
+            <li>Bottleneck/capacity: {hasCapacityShortfall ? '🔴 shortfall' : '🟢 adequate'}</li>
+            <li>Single-source critical items: {singleSourceCount}</li>
           </ul>
+          {bottleneck && (
+            <div className="small" style={{ marginTop: 8 }}>
+              Bottleneck: <b>{bottleneck.station}</b> ({bottleneck.utilizationPct.toFixed(1)}% util)
+            </div>
+          )}
         </div>
       </div>
 
@@ -202,150 +237,162 @@ const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
         <div className="card">
           <h3>Global Drivers</h3>
           <div className="header">
-            {Object.entries(scenario.inputs).map(([k, v]) => (
-              <label key={k}>
-                {k}
-                <input
-                  type="number"
-                  value={v}
-                  onChange={(e) =>
-                    updateScenario({
-                      ...scenario,
-                      inputs: { ...scenario.inputs, [k]: Number(e.target.value) },
-                      auditLog: [...scenario.auditLog, `Updated input ${k}`],
-                    })
-                  }
-                />
-              </label>
-            ))}
+            {inputKeys.map((k) => {
+              const v = scenario.inputs[k];
+              return (
+                <label key={String(k)}>
+                  {String(k)}
+                  <input
+                    type="number"
+                    value={typeof v === 'number' ? v : 0}
+                    onChange={(e) =>
+                      updateScenario({
+                        ...scenario,
+                        inputs: { ...scenario.inputs, [k]: Number(e.target.value) },
+                        auditLog: [...scenario.auditLog, `Updated input ${String(k)}`],
+                      })
+                    }
+                  />
+                </label>
+              );
+            })}
           </div>
         </div>
       )}
 
-     {activeTab === 'Processes' && (
-  <div className="card">
-    <h3>Capacity & Bottleneck</h3>
+      {activeTab === 'Processes' && (
+        <div className="card">
+          <h3>Capacity & Bottleneck</h3>
 
-    {bottleneck && (
-      <div className="small">
-        Bottleneck: <b>{bottleneck.station}</b> ({bottleneck.utilizationPct.toFixed(1)}% utilization)
-      </div>
-    )}
+          {bottleneck && (
+            <div className="small">
+              Bottleneck: <b>{bottleneck.station}</b> ({bottleneck.utilizationPct.toFixed(1)}% utilization)
+            </div>
+          )}
 
-    <table>
-      <thead>
-        <tr>
-          <th>Station</th>
-          <th>Cycle (s)</th>
-          <th>Installed</th>
-          <th>Capacity/mo</th>
-          <th>Util %</th>
-          <th>Req Machines</th>
-          <th>Shortfall</th>
-        </tr>
-      </thead>
-      <tbody>
-        {capacityRows.map((r) => (
-          <tr key={r.station}>
-            <td>{r.station}</td>
-            <td>{r.cycleTimeSec}</td>
-            <td>{r.installed}</td>
-            <td>{Math.round(r.capacityUnitsPerMonth).toLocaleString()}</td>
-            <td>{r.utilizationPct.toFixed(1)}%</td>
-            <td>{r.requiredMachines.toFixed(2)}</td>
-            <td>{r.shortfallMachines > 0 ? `+${r.shortfallMachines.toFixed(2)}` : '—'}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+          <table>
+            <thead>
+              <tr>
+                <th>Station</th>
+                <th>Cycle (s)</th>
+                <th>Installed</th>
+                <th>Capacity/mo</th>
+                <th>Util %</th>
+                <th>Req Machines</th>
+                <th>Shortfall</th>
+              </tr>
+            </thead>
+            <tbody>
+              {capacityRows.map((r) => (
+                <tr key={r.station}>
+                  <td>{r.station}</td>
+                  <td>{r.cycleTimeSec}</td>
+                  <td>{r.installed}</td>
+                  <td>{Math.round(r.capacityUnitsPerMonth).toLocaleString()}</td>
+                  <td>{r.utilizationPct.toFixed(1)}%</td>
+                  <td>{r.requiredMachines.toFixed(2)}</td>
+                  <td>{r.shortfallMachines > 0 ? `+${r.shortfallMachines.toFixed(2)}` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-    <div className="small" style={{ marginTop: 12 }}>
-      Staffing estimate (FTE): <b>{fte.toFixed(2)}</b> (based on labour min/unit and available minutes/month)
-    </div>
-  </div>
-)}
+          <div className="small" style={{ marginTop: 12 }}>
+            Staffing estimate (FTE): <b>{fte.toFixed(2)}</b>
+          </div>
+        </div>
+      )}
 
       {activeTab === 'Inventory' && (
-  <div>
-    <div className="card small">
-      <h3>Inventory Exposure (Cash Tied Up)</h3>
-      <ul>
-        <li>Pipeline value: €{Math.round(invTotals.pipelineValue).toLocaleString()}</li>
-        <li>Safety stock value: €{Math.round(invTotals.safetyStockValue).toLocaleString()}</li>
-        <li>
-          <b>Total exposure: €{Math.round(invTotals.total).toLocaleString()}</b>
-        </li>
-      </ul>
-    </div>
+        <div>
+          <div className="card small">
+            <h3>Inventory Exposure (Cash Tied Up)</h3>
+            <ul>
+              <li>Pipeline value: €{Math.round(invTotals.pipelineValue).toLocaleString()}</li>
+              <li>Safety stock value: €{Math.round(invTotals.safetyStockValue).toLocaleString()}</li>
+              <li>
+                <b>Total exposure: €{Math.round(invTotals.total).toLocaleString()}</b>
+              </li>
+            </ul>
+          </div>
 
-    <div className="card">
-      <h3>Reorder Points (units)</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Lead Time (d)</th>
-            <th>ROP (units)</th>
-            <th>Pipeline €</th>
-            <th>SS €</th>
-          </tr>
-        </thead>
-        <tbody>
-          {invExposure.map((r) => (
-            <tr key={r.item}>
-              <td>{r.item}</td>
-              <td>{r.leadTimeDays}</td>
-              <td>{Math.round(r.reorderPointUnits).toLocaleString()}</td>
-              <td>€{Math.round(r.pipelineValue).toLocaleString()}</td>
-              <td>€{Math.round(r.safetyStockValue).toLocaleString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          <div className="card">
+            <h3>Reorder Points (units)</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Lead Time (d)</th>
+                  <th>ROP (units)</th>
+                  <th>Pipeline €</th>
+                  <th>SS €</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invExposure.map((r) => (
+                  <tr key={r.item}>
+                    <td>{r.item}</td>
+                    <td>{r.leadTimeDays}</td>
+                    <td>{Math.round(r.reorderPointUnits).toLocaleString()}</td>
+                    <td>€{Math.round(r.pipelineValue).toLocaleString()}</td>
+                    <td>€{Math.round(r.safetyStockValue).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-    <EditableTable
-      title="Inventory & BOM"
-      rows={scenario.inventory}
-      columns={[
-        { key: 'name', label: 'Item' },
-        { key: 'category', label: 'Category' },
-        { key: 'unitCost', label: 'Unit Cost', type: 'number' },
-        { key: 'usagePerProduct', label: 'Usage/Product', type: 'number' },
-        { key: 'leadTimeDays', label: 'Lead Time (d)', type: 'number' },
-        { key: 'moq', label: 'MOQ', type: 'number' },
-        { key: 'singleSource', label: 'Single Source', type: 'checkbox' },
-      ]}
-      onChange={(rows) =>
-        updateScenario({ ...scenario, inventory: rows, auditLog: [...scenario.auditLog, 'Inventory table edited'] })
-      }
-      createRow={() => ({
-        id: crypto.randomUUID(),
-        name: 'New item',
-        category: 'RM' as const,
-        unitCost: 0,
-        usagePerProduct: 1,
-        leadTimeDays: 0,
-        moq: 0,
-        singleSource: false,
-      })}
-    />
-  </div>
-)}
+          <EditableTable
+            title="Inventory & BOM"
+            rows={scenario.inventory}
+            columns={[
+              { key: 'name', label: 'Item' },
+              { key: 'category', label: 'Category' },
+              { key: 'unitCost', label: 'Unit Cost', type: 'number' },
+              { key: 'usagePerProduct', label: 'Usage/Product', type: 'number' },
+              { key: 'leadTimeDays', label: 'Lead Time (d)', type: 'number' },
+              { key: 'moq', label: 'MOQ', type: 'number' },
+              { key: 'singleSource', label: 'Single Source', type: 'checkbox' },
+            ]}
+            onChange={(rows) =>
+              updateScenario({ ...scenario, inventory: rows, auditLog: [...scenario.auditLog, 'Inventory table edited'] })
+            }
+            createRow={() => ({
+              id: crypto.randomUUID(),
+              name: 'New item',
+              category: 'RM' as const,
+              unitCost: 0,
+              usagePerProduct: 1,
+              leadTimeDays: 0,
+              moq: 0,
+              singleSource: false,
+            })}
+          />
+        </div>
+      )}
 
       {activeTab === 'Machines' && (
         <div className="card">
-          <h3>Machine Requirements</h3>
-          <ul>
-            {scenario.machines.map((m) => {
-              const req = machineRequirementForStation(scenario, m.cycleTimeSec);
-              return (
-                <li key={m.id}>
-                  {m.station}: required {req.toFixed(2)} vs installed {m.machinesInstalled}
-                </li>
-              );
+          <h3>Machines</h3>
+          <p className="small">
+            Edit cycle time and installed count. Capacity analysis is shown in <b>Processes</b>.
+          </p>
+          <EditableTable
+            title="Stations"
+            rows={scenario.machines}
+            columns={[
+              { key: 'station', label: 'Station' },
+              { key: 'cycleTimeSec', label: 'Cycle Time (s)', type: 'number' },
+              { key: 'machinesInstalled', label: 'Installed', type: 'number' },
+            ]}
+            onChange={(rows) => updateScenario({ ...scenario, machines: rows })}
+            createRow={() => ({
+              id: crypto.randomUUID(),
+              station: 'New station',
+              cycleTimeSec: 60,
+              machinesInstalled: 1,
             })}
-          </ul>
+          />
         </div>
       )}
 
@@ -366,56 +413,57 @@ const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
             type: 'FG' as const,
             monthlyCost: 0,
             utilizationPct: 0.5,
+            capacityPctLimit: 0.85,
           })}
         />
       )}
 
       {activeTab === 'Logistics/Lanes' && (
-  <div>
-    <div className="card">
-      <h3>Lane Summary</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Lane</th>
-            <th>Shipments/mo</th>
-            <th>Cost/unit</th>
-          </tr>
-        </thead>
-        <tbody>
-          {laneSummary.map((l) => (
-            <tr key={l.lane}>
-              <td>{l.lane}</td>
-              <td>{l.shipmentsPerMonth.toFixed(2)}</td>
-              <td>€{l.costPerUnit.toFixed(2)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+        <div>
+          <div className="card">
+            <h3>Lane Summary</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Lane</th>
+                  <th>Shipments/mo</th>
+                  <th>Cost/unit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {laneSummary.map((l) => (
+                  <tr key={l.lane}>
+                    <td>{l.lane}</td>
+                    <td>{l.shipmentsPerMonth.toFixed(2)}</td>
+                    <td>€{l.costPerUnit.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-    <EditableTable
-      title="Transport Lanes"
-      rows={scenario.logistics}
-      columns={[
-        { key: 'lane', label: 'Lane' },
-        { key: 'direction', label: 'Direction' },
-        { key: 'mode', label: 'Mode' },
-        { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' },
-        { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' },
-      ]}
-      onChange={(rows) => updateScenario({ ...scenario, logistics: rows })}
-      createRow={() => ({
-        id: crypto.randomUUID(),
-        lane: 'New Lane',
-        direction: 'Inbound' as const,
-        mode: 'Road' as const,
-        costPerShipment: 0,
-        unitsPerShipment: 1,
-      })}
-    />
-  </div>
-)}
+          <EditableTable
+            title="Transport Lanes"
+            rows={scenario.logistics}
+            columns={[
+              { key: 'lane', label: 'Lane' },
+              { key: 'direction', label: 'Direction' },
+              { key: 'mode', label: 'Mode' },
+              { key: 'costPerShipment', label: 'Cost/Shipment', type: 'number' },
+              { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' },
+            ]}
+            onChange={(rows) => updateScenario({ ...scenario, logistics: rows })}
+            createRow={() => ({
+              id: crypto.randomUUID(),
+              lane: 'New Lane',
+              direction: 'Inbound' as const,
+              mode: 'Road' as const,
+              costPerShipment: 0,
+              unitsPerShipment: 1,
+            })}
+          />
+        </div>
+      )}
 
       {activeTab === 'Maintenance' && (
         <EditableTable
@@ -441,7 +489,7 @@ const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
       {activeTab === 'Quality' && (
         <div className="card">
           <h3>Quality module</h3>
-          <p>Includes quality cost in total cost model and Six Pack capability checks.</p>
+          <p>Quality cost is included in unit cost; capability is checked in Six Pack.</p>
         </div>
       )}
 
@@ -494,8 +542,7 @@ const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
         <div className="card">
           <h3>Summary</h3>
           <p>
-            Gross margin per unit: €{cost.marginPerUnit.toFixed(2)} | Total cost per unit: €
-            {cost.total.toFixed(2)}
+            Gross margin per unit: €{cost.marginPerUnit.toFixed(2)} | Total cost per unit: €{cost.total.toFixed(2)}
           </p>
         </div>
       )}
