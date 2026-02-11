@@ -3,15 +3,29 @@ export type ScenarioName = 'Pilot' | 'Ramp' | 'Scale';
 export interface GlobalInputs {
   salePricePerUnit: number;
   monthlyDemand: number;
+
+  // time/capacity model
   availableMinutesPerMonth: number;
-  labourRatePerHour: number;
-  labourMinutesPerUnit: number;
-  qualityCostPerUnit: number;
   oee: number;
   downtimePct: number;
+
+  // labour model
+  labourRatePerHour: number;
+  labourMinutesPerUnit: number;
+
+  // quality / yield
+  qualityCostPerUnit: number;
+  scrapRatePct?: number; // % of demand extra to cover scrap/rework, e.g. 0.05 = 5%
+
+  // finance
   capexTotal: number;
   depreciationMonths: number;
   marginGuardrailPct: number;
+  overheadPct?: number; // % add-on to labour as overhead burden, e.g. 0.25 = 25%
+  holdingRatePctAnnual?: number; // annual inventory holding rate, e.g. 0.24 = 24%
+
+  // inventory policy (used for exposure + reorder points)
+  safetyStockDays?: number; // e.g. 14
 }
 
 export interface InventoryItem {
@@ -47,6 +61,7 @@ export interface Warehouse {
   type: 'FG' | 'RM';
   monthlyCost: number;
   utilizationPct: number;
+  capacityPctLimit?: number; // e.g. 0.85 alert threshold
 }
 
 export interface MaintenanceAsset {
