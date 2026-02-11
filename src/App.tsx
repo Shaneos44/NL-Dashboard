@@ -5,7 +5,7 @@ import './components/styles.css';
 import { EditableTable } from './components/EditableTable';
 import { KpiCard } from './components/KpiCard';
 
-import type { GlobalInputs, ScenarioName, PlanningDecision } from './lib/types';
+import type { GlobalInputs, ScenarioName } from './lib/types';
 import type { AppState } from './lib/store';
 
 import {
@@ -20,6 +20,8 @@ import {
   computeInventoryExposure,
   inventoryExposureTotals,
   logisticsSummary,
+  inventoryRemainingAfterProduction,
+  productionUnitsGoodCompleted,
 } from './lib/calc';
 
 import {
@@ -34,6 +36,9 @@ import {
 
 const tabs = [
   'Executive Summary',
+  'Production',
+  'Stock Take',
+  'Resources',
   'Decisions',
   'Inputs',
   'Processes',
@@ -66,43 +71,6 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function defaultDecisions(): PlanningDecision[] {
-  return [
-    {
-      id: crypto.randomUUID(),
-      title: 'Capacity: how many machines & when?',
-      target: 'No station > 85% utilization at target demand',
-      owner: '',
-      status: 'Not started',
-      notes: '',
-    },
-    {
-      id: crypto.randomUUID(),
-      title: 'People: how many FTE & what roles?',
-      target: 'Staffing plan supports ramp without overtime risk',
-      owner: '',
-      status: 'Not started',
-      notes: '',
-    },
-    {
-      id: crypto.randomUUID(),
-      title: 'Supply chain: what to order & when?',
-      target: 'No stockouts with defined safety stock policy',
-      owner: '',
-      status: 'Not started',
-      notes: '',
-    },
-  ];
-}
-
-type RAG = 'Green' | 'Amber' | 'Red';
-
-function ragFromFlags(flags: { red: number; amber: number }) : RAG {
-  if (flags.red > 0) return 'Red';
-  if (flags.amber > 0) return 'Amber';
-  return 'Green';
-}
-
 export default function App() {
   const [state, setState] = useState<AppState>(defaultState);
   const [activeTab, setActiveTab] = useState<Tab>('Executive Summary');
@@ -110,38 +78,36 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
   const hydrated = useRef(false);
 
-  // One-time migration so older saved states don't break new required fields
-  const migratedRef = useRef(false);
-
   useEffect(() => {
     let mounted = true;
     (async () => {
       const loaded = await loadState();
 
-      // MIGRATION: ensure decisions exists in every scenario
-      const patched = structuredClone(loaded);
-      let changed = false;
-
+      // Simple migration for older states (adds new arrays if missing)
+      const patched = structuredClone(loaded) as any;
       (['Pilot', 'Ramp', 'Scale'] as ScenarioName[]).forEach((sn) => {
-        const sc: any = patched.scenarios[sn];
-        if (!sc.decisions || !Array.isArray(sc.decisions) || sc.decisions.length === 0) {
-          sc.decisions = defaultDecisions();
-          sc.auditLog = [...(sc.auditLog ?? []), `Auto-migration: added Decisions (${nowIso()})`];
-          changed = true;
-        }
+        const sc = patched.scenarios?.[sn];
+        if (!sc) return;
+        sc.people = Array.isArray(sc.people) ? sc.people : [];
+        sc.machineAssets = Array.isArray(sc.machineAssets) ? sc.machineAssets : [];
+        sc.production = Array.isArray(sc.production) ? sc.production : [];
+        sc.inventory = Array.isArray(sc.inventory) ? sc.inventory.map((it: any) => ({
+          ...it,
+          onHandQty: typeof it.onHandQty === 'number' ? it.onHandQty : 0,
+          reorderPointQty: typeof it.reorderPointQty === 'number' ? it.reorderPointQty : undefined,
+          minQty: typeof it.minQty === 'number' ? it.minQty : undefined,
+          uom: it.uom ?? 'pcs',
+          location: it.location ?? '',
+        })) : [];
+        sc.auditLog = Array.isArray(sc.auditLog) ? sc.auditLog : [];
       });
 
       if (mounted) {
         setState(patched);
         setLoading(false);
-
-        // If migrated, save once so it doesn't keep happening
-        if (changed) migratedRef.current = true;
       }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   useEffect(() => {
@@ -149,22 +115,13 @@ export default function App() {
       hydrated.current = true;
       return;
     }
-
     setSyncStatus('syncing');
     void saveState(state)
       .then(() => setSyncStatus('synced'))
       .catch(() => setSyncStatus('error'));
   }, [loading, state]);
 
-  // After first save, clear migrated flag (prevents extra logs)
-  useEffect(() => {
-    if (migratedRef.current && syncStatus === 'synced') migratedRef.current = false;
-  }, [syncStatus]);
-
   const scenario = state.scenarios[state.selectedScenario];
-
-  // Defensive: if still missing for any reason, provide a non-crashing default
-  const decisions = scenario.decisions && scenario.decisions.length > 0 ? scenario.decisions : defaultDecisions();
 
   const cost = useMemo(() => computeCostBreakdown(scenario), [scenario]);
   const takt = useMemo(() => computeTaktTimeMinutes(scenario), [scenario]);
@@ -177,9 +134,20 @@ export default function App() {
 
   const invExposure = useMemo(() => computeInventoryExposure(scenario), [scenario]);
   const invTotals = useMemo(() => inventoryExposureTotals(scenario), [scenario]);
+
   const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
 
+  // NEW production/stock signals
+  const completedUnits = useMemo(() => productionUnitsGoodCompleted(scenario), [scenario]);
+  const stockView = useMemo(() => inventoryRemainingAfterProduction(scenario), [scenario]);
+  const belowMinCount = stockView.filter((x) => x.status === 'Below Min').length;
+  const reorderCount = stockView.filter((x) => x.status === 'Reorder').length;
+
+  const hasCapacityShortfall = capacityRows.some((r) => r.shortfallMachines > 0.0001);
+  const singleSourceCount = scenario.inventory.filter((i) => i.singleSource).length;
+
   const scenarios: ScenarioName[] = ['Pilot', 'Ramp', 'Scale'];
+  const inputKeys = Object.keys(scenario.inputs) as (keyof GlobalInputs)[];
 
   const updateScenario = (next: typeof scenario, note?: string) => {
     const audit = note ? [...next.auditLog, note] : next.auditLog;
@@ -190,8 +158,6 @@ export default function App() {
     }));
   };
 
-  const inputKeys = Object.keys(scenario.inputs) as (keyof GlobalInputs)[];
-
   const marginCurve = useMemo(() => {
     return [0.5, 0.75, 1, 1.25, 1.5].map((mult) => {
       const demand = Math.round(scenario.inputs.monthlyDemand * mult);
@@ -201,123 +167,10 @@ export default function App() {
     });
   }, [scenario]);
 
-  // Executive-grade “signals”
-  const hasCapacityShortfall = capacityRows.some((r) => r.shortfallMachines > 0.0001);
-  const worstUtil = bottleneck ? bottleneck.utilizationPct : 0;
-  const singleSourceCount = scenario.inventory.filter((i) => i.singleSource).length;
-  const warehouseOver = scenario.warehouses.filter((w) => w.utilizationPct > (w.capacityPctLimit ?? 0.85)).length;
-  const sixFailCount = scenario.sixPack.filter((r) => !evaluateSixPack(r).pass).length;
-
-  const flags = {
-    red: 0,
-    amber: 0,
-  };
-
-  // Margin guardrail
-  if (cost.marginPct < scenario.inputs.marginGuardrailPct) flags.red += 1;
-
-  // Capacity
-  if (hasCapacityShortfall) flags.red += 1;
-  else if (worstUtil > 80) flags.amber += 1;
-
-  // Supply risk
-  if (singleSourceCount >= 3) flags.amber += 1;
-  if (singleSourceCount >= 6) flags.red += 1;
-
-  // Warehouse
-  if (warehouseOver > 0) flags.amber += 1;
-
-  // Quality capability
-  if (sixFailCount > 0) flags.amber += 1;
-  if (sixFailCount >= 3) flags.red += 1;
-
-  const overallRag = ragFromFlags(flags);
-
-  const topActions = useMemo(() => {
-    const actions: { rag: RAG; title: string; detail: string; goto: Tab }[] = [];
-
-    if (cost.marginPct < scenario.inputs.marginGuardrailPct) {
-      actions.push({
-        rag: 'Red',
-        title: 'Margin below guardrail',
-        detail: `Margin ${cost.marginPct.toFixed(1)}% vs guardrail ${scenario.inputs.marginGuardrailPct}% — review inputs, BOM costs, logistics, holding/scrap.`,
-        goto: 'Summary / Export',
-      });
-    }
-
-    if (hasCapacityShortfall) {
-      actions.push({
-        rag: 'Red',
-        title: 'Capacity shortfall',
-        detail: bottleneck
-          ? `Bottleneck ${bottleneck.station} at ${bottleneck.utilizationPct.toFixed(1)}% util — add machines or reduce cycle time/OEE assumptions.`
-          : 'One or more stations require more machines than installed.',
-        goto: 'Processes',
-      });
-    }
-
-    if (fte > 1.2) {
-      actions.push({
-        rag: 'Amber',
-        title: 'High staffing load',
-        detail: `Estimated FTE ${fte.toFixed(2)} — verify labour minutes/unit and shift assumptions.`,
-        goto: 'Inputs',
-      });
-    }
-
-    if (singleSourceCount > 0) {
-      actions.push({
-        rag: 'Amber',
-        title: 'Single-source items',
-        detail: `${singleSourceCount} item(s) flagged — add mitigation owners + dual-source plan.`,
-        goto: 'Risk',
-      });
-    }
-
-    if (invTotals.total > 250000) {
-      actions.push({
-        rag: 'Amber',
-        title: 'Inventory cash exposure high',
-        detail: `Pipeline + safety stock ≈ ${aud0.format(invTotals.total)} — reduce lead times, safety stock days, or increase shipment cadence.`,
-        goto: 'Inventory',
-      });
-    }
-
-    if (warehouseOver > 0) {
-      actions.push({
-        rag: 'Amber',
-        title: 'Warehouse utilization over limit',
-        detail: `${warehouseOver} warehouse(s) over threshold — adjust utilization/limit or capacity strategy.`,
-        goto: 'Warehouses',
-      });
-    }
-
-    if (sixFailCount > 0) {
-      actions.push({
-        rag: 'Amber',
-        title: 'Six Pack capability gaps',
-        detail: `${sixFailCount} failing metric(s) — focus improvement on top CTQs.`,
-        goto: 'Six Pack',
-      });
-    }
-
-    return actions.slice(0, 6);
-  }, [
-    cost.marginPct,
-    scenario.inputs.marginGuardrailPct,
-    hasCapacityShortfall,
-    bottleneck,
-    fte,
-    singleSourceCount,
-    invTotals.total,
-    warehouseOver,
-    sixFailCount,
-  ]);
-
   if (loading) {
     return (
       <div className="app">
-        <h1>Ops & Planning Dashboard</h1>
+        <h1>Ops & Production Dashboard</h1>
         <div className="card">Loading…</div>
       </div>
     );
@@ -325,7 +178,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <h1>Ops & Planning Dashboard</h1>
+      <h1>Ops & Production Dashboard</h1>
       <div className="small">
         Currency: <b>AUD</b> · Sync: {syncStatus}
       </div>
@@ -333,23 +186,19 @@ export default function App() {
       <div className="header">
         <select
           value={state.selectedScenario}
-          onChange={(e) => setState((s) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))}
+          onChange={(e) =>
+            setState((s: AppState) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))
+          }
         >
           {scenarios.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
+            <option key={n} value={n}>{n}</option>
           ))}
         </select>
 
         <button
           onClick={() => {
             const target: ScenarioName =
-              state.selectedScenario === 'Pilot'
-                ? 'Ramp'
-                : state.selectedScenario === 'Ramp'
-                ? 'Scale'
-                : 'Pilot';
+              state.selectedScenario === 'Pilot' ? 'Ramp' : state.selectedScenario === 'Ramp' ? 'Scale' : 'Pilot';
             setState(duplicateScenario(state, state.selectedScenario, target));
           }}
         >
@@ -359,28 +208,15 @@ export default function App() {
         <button onClick={() => downloadFile(`${scenario.name}.json`, exportScenarioJson(scenario), 'application/json')}>
           Export JSON
         </button>
-        <button onClick={() => downloadFile(`${scenario.name}-inventory.csv`, inventoryCsv(scenario), 'text/csv')}>
-          Export Inventory CSV
-        </button>
-        <button onClick={() => downloadFile(`${scenario.name}-sixpack.csv`, sixPackCsv(scenario), 'text/csv')}>
-          Export Six Pack CSV
-        </button>
       </div>
 
       <div className="kpis">
-        <KpiCard
-          label="Revenue / mo"
-          value={aud0.format(scenario.inputs.salePricePerUnit * scenario.inputs.monthlyDemand)}
-        />
-        <KpiCard label="Total cost / unit" value={aud.format(cost.total)} />
-        <KpiCard
-          label="Margin %"
-          value={`${cost.marginPct.toFixed(1)}%`}
-          tone={cost.marginPct > scenario.inputs.marginGuardrailPct ? 'good' : 'bad'}
-        />
-        <KpiCard label="Takt time" value={`${takt.toFixed(2)} min`} tone={takt > 0.4 ? 'warn' : 'good'} />
-        <KpiCard label="Risk score" value={String(score)} tone={score > 60 ? 'bad' : score > 35 ? 'warn' : 'good'} />
-        <KpiCard label="Inventory exposure" value={aud0.format(invTotals.total)} tone={invTotals.total > 250000 ? 'warn' : 'good'} />
+        <KpiCard label="Revenue / mo" value={aud0.format(scenario.inputs.salePricePerUnit * scenario.inputs.monthlyDemand)} />
+        <KpiCard label="Margin %" value={`${cost.marginPct.toFixed(1)}%`} tone={cost.marginPct > scenario.inputs.marginGuardrailPct ? 'good' : 'bad'} />
+        <KpiCard label="Capacity" value={hasCapacityShortfall ? 'Shortfall' : 'OK'} tone={hasCapacityShortfall ? 'bad' : 'good'} />
+        <KpiCard label="Completed units" value={completedUnits.toLocaleString()} />
+        <KpiCard label="Stock alerts" value={`${belowMinCount} below min / ${reorderCount} reorder`} tone={belowMinCount > 0 ? 'bad' : reorderCount > 0 ? 'warn' : 'good'} />
+        <KpiCard label="Single-source items" value={String(singleSourceCount)} tone={singleSourceCount > 0 ? 'warn' : 'good'} />
       </div>
 
       <div className="tab-row">
@@ -391,63 +227,18 @@ export default function App() {
         ))}
       </div>
 
-      {/* EXECUTIVE SUMMARY */}
+      {/* EXEC SUMMARY */}
       {activeTab === 'Executive Summary' && (
-        <div>
-          <div className="layout-grid">
-            <div className="card">
-              <h3>Executive Snapshot</h3>
-              <div className={`badge ${overallRag === 'Green' ? 'good' : overallRag === 'Amber' ? 'warn' : 'bad'}`}>
-                Overall status: <b>{overallRag}</b>
-              </div>{' '}
-              <div className="badge">
-                Demand: <b>{scenario.inputs.monthlyDemand.toLocaleString()}</b> units/mo
-              </div>{' '}
-              <div className="badge">
-                Bottleneck: <b>{bottleneck ? bottleneck.station : '—'}</b>
-              </div>
-              <hr />
-              <div className="small">
-                • Margin: <b>{cost.marginPct.toFixed(1)}%</b> ({aud.format(cost.marginPerUnit)} / unit)
-              </div>
-              <div className="small">
-                • Capacity: <b>{hasCapacityShortfall ? 'Shortfall' : 'OK'}</b>{' '}
-                {bottleneck ? `(${bottleneck.utilizationPct.toFixed(1)}% util)` : ''}
-              </div>
-              <div className="small">
-                • People: <b>{fte.toFixed(2)} FTE</b> estimated
-              </div>
-              <div className="small">
-                • Supply risk: <b>{singleSourceCount}</b> single-source item(s)
-              </div>
-              <div className="small">
-                • Cash tied up: <b>{aud0.format(invTotals.total)}</b> (pipeline + safety)
-              </div>
-              <div className="hint" style={{ marginTop: 10 }}>
-                “Executive Summary” is designed to be screenshot-ready for SLT/ELT.
-              </div>
-            </div>
-
-            <div className="card">
-              <h3>Top Actions (auto)</h3>
-              {topActions.length === 0 ? (
-                <div className="small">No major actions flagged.</div>
-              ) : (
-                <ul className="small">
-                  {topActions.map((a, idx) => (
-                    <li key={idx} style={{ marginBottom: 10 }}>
-                      <span className={`badge ${a.rag === 'Green' ? 'good' : a.rag === 'Amber' ? 'warn' : 'bad'}`}>
-                        {a.rag}
-                      </span>{' '}
-                      <b>{a.title}</b>
-                      <div className="hint">{a.detail}</div>
-                      <button style={{ marginTop: 6 }} onClick={() => setActiveTab(a.goto)}>
-                        Open: {a.goto}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+        <div className="layout-grid">
+          <div className="card">
+            <h3>Executive Snapshot</h3>
+            <div className="small">
+              • Demand: <b>{scenario.inputs.monthlyDemand.toLocaleString()}</b> units/mo<br/>
+              • Total cost/unit: <b>{aud.format(cost.total)}</b><br/>
+              • Bottleneck: <b>{bottleneck ? bottleneck.station : '—'}</b><br/>
+              • FTE estimate: <b>{fte.toFixed(2)}</b><br/>
+              • Inventory exposure: <b>{aud0.format(invTotals.total)}</b><br/>
+              • Stock alerts: <b>{belowMinCount}</b> below min, <b>{reorderCount}</b> reorder
             </div>
           </div>
 
@@ -455,12 +246,7 @@ export default function App() {
             <h3>Margin Curve vs Volume</h3>
             <div style={{ width: '100%', height: 240 }}>
               <ResponsiveContainer>
-                <LineChart data={[0.5, 0.75, 1, 1.25, 1.5].map((mult) => {
-                  const demand = Math.round(scenario.inputs.monthlyDemand * mult);
-                  const tmp = { ...scenario, inputs: { ...scenario.inputs, monthlyDemand: demand } };
-                  const res = computeCostBreakdown(tmp);
-                  return { volume: demand, marginPct: Number(res.marginPct.toFixed(1)) };
-                })}>
+                <LineChart data={marginCurve}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="volume" />
                   <YAxis unit="%" />
@@ -469,65 +255,237 @@ export default function App() {
                 </LineChart>
               </ResponsiveContainer>
             </div>
-            <div className="hint">If the curve looks wrong, update: BOM unit costs, labour minutes/unit, logistics, holding/scrap.</div>
           </div>
         </div>
       )}
 
-      {/* DECISIONS */}
-      {activeTab === 'Decisions' && (
+      {/* PRODUCTION TAB */}
+      {activeTab === 'Production' && (
         <div>
+          <div className="card">
+            <h3>Production Schedule & Run Log</h3>
+            <div className="hint">
+              Create runs, assign people + machines, mark status and record notes/observations. Completed units automatically consume stock.
+            </div>
+          </div>
+
           <EditableTable
-            title="Top Planning Decisions (editable)"
-            rows={decisions}
+            title="Runs"
+            rows={scenario.production}
             columns={[
-              { key: 'title', label: 'Decision / Question' },
-              { key: 'target', label: 'Target / Definition of done', type: 'textarea' },
-              { key: 'owner', label: 'Owner' },
+              { key: 'date', label: 'Date' },
+              { key: 'startTime', label: 'Start (HH:MM)' },
+              { key: 'durationMin', label: 'Duration (min)', type: 'number' },
+              { key: 'process', label: 'Process' },
+              { key: 'workOrder', label: 'Work Order' },
+              { key: 'unitsPlanned', label: 'Planned', type: 'number' },
+              { key: 'unitsGood', label: 'Good', type: 'number' },
+              { key: 'unitsScrap', label: 'Scrap', type: 'number' },
+              { key: 'assignedPeople', label: 'People (comma list)', type: 'textarea' },
+              { key: 'machinesUsed', label: 'Machines (comma list)', type: 'textarea' },
               {
                 key: 'status',
                 label: 'Status',
                 type: 'select',
                 options: [
-                  { label: 'Not started', value: 'Not started' },
-                  { label: 'In progress', value: 'In progress' },
+                  { label: 'Planned', value: 'Planned' },
+                  { label: 'In Progress', value: 'In Progress' },
+                  { label: 'Complete', value: 'Complete' },
                   { label: 'Blocked', value: 'Blocked' },
-                  { label: 'Done', value: 'Done' },
+                  { label: 'Cancelled', value: 'Cancelled' },
                 ],
               },
               { key: 'notes', label: 'Notes', type: 'textarea' },
+              { key: 'observations', label: 'Observations', type: 'textarea' },
             ]}
-            onChange={(rows) =>
-              updateScenario({ ...scenario, decisions: rows }, `Updated Decisions (${nowIso()})`)
-            }
+            onChange={(rows) => updateScenario({ ...scenario, production: rows }, `Updated production runs (${nowIso()})`)}
             createRow={() => ({
               id: crypto.randomUUID(),
-              title: 'New decision',
-              target: '',
-              owner: '',
-              status: 'Not started' as const,
+              date: new Date().toISOString().slice(0, 10),
+              startTime: '08:00',
+              durationMin: 120,
+              process: 'Final Assembly',
+              workOrder: '',
+              unitsPlanned: 0,
+              unitsGood: 0,
+              unitsScrap: 0,
+              assignedPeople: '',
+              machinesUsed: '',
+              status: 'Planned' as const,
               notes: '',
+              observations: '',
             })}
           />
 
           <div className="card">
-            <h3>How this becomes “exec-ready”</h3>
-            <ul className="small">
-              <li>Set the 3 decisions above (owners + targets).</li>
-              <li>Fill Inputs + the core tables (Machines, Inventory, Logistics).</li>
-              <li>Executive Summary auto-flags issues and produces a short “Top Actions” list.</li>
-            </ul>
+            <h3>Machine Usage Quick View</h3>
+            <div className="hint">Update machine status in Resources tab. Use machine names in the run’s “Machines” field.</div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Machine</th>
+                    <th>Station</th>
+                    <th>Status</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scenario.machineAssets.map((m) => (
+                    <tr key={m.id}>
+                      <td>{m.name}</td>
+                      <td>{m.station}</td>
+                      <td>{m.status}</td>
+                      <td>{m.notes}</td>
+                    </tr>
+                  ))}
+                  {scenario.machineAssets.length === 0 && (
+                    <tr><td colSpan={4} className="small">No machine assets yet. Add them in Resources.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* STOCK TAKE TAB */}
+      {activeTab === 'Stock Take' && (
+        <div>
+          <div className="card">
+            <h3>Stock Take</h3>
+            <div className="small">
+              Completed production runs consume stock based on BOM usage. Remaining is calculated automatically.
+            </div>
+          </div>
+
+          <div className="card">
+            <h3>Remaining Stock (after completed production)</h3>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>On hand</th>
+                    <th>Consumed</th>
+                    <th>Remaining</th>
+                    <th>Reorder point</th>
+                    <th>Min</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stockView.map((r) => (
+                    <tr key={r.id}>
+                      <td>{r.name}</td>
+                      <td>{r.onHandQty.toLocaleString()}</td>
+                      <td>{Math.round(r.consumedQty).toLocaleString()}</td>
+                      <td>{Math.round(r.remainingQty).toLocaleString()}</td>
+                      <td>{r.reorderPointQty == null ? '—' : r.reorderPointQty.toLocaleString()}</td>
+                      <td>{r.minQty == null ? '—' : r.minQty.toLocaleString()}</td>
+                      <td>{r.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="hint" style={{ marginTop: 8 }}>
+              To change stock, edit Inventory → onHandQty / reorderPointQty / minQty.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RESOURCES TAB */}
+      {activeTab === 'Resources' && (
+        <div>
+          <EditableTable
+            title="People"
+            rows={scenario.people}
+            columns={[
+              { key: 'name', label: 'Name' },
+              { key: 'role', label: 'Role' },
+              { key: 'shift', label: 'Shift' },
+              { key: 'notes', label: 'Notes', type: 'textarea' },
+            ]}
+            onChange={(rows) => updateScenario({ ...scenario, people: rows }, `Updated people (${nowIso()})`)}
+            createRow={() => ({
+              id: crypto.randomUUID(),
+              name: 'New person',
+              role: 'Operator',
+              shift: 'Day',
+              notes: '',
+            })}
+          />
+
+          <EditableTable
+            title="Machine Assets"
+            rows={scenario.machineAssets}
+            columns={[
+              { key: 'name', label: 'Machine name' },
+              { key: 'station', label: 'Station' },
+              {
+                key: 'status',
+                label: 'Status',
+                type: 'select',
+                options: [
+                  { label: 'Available', value: 'Available' },
+                  { label: 'In Use', value: 'In Use' },
+                  { label: 'Out of Service', value: 'Out of Service' },
+                ],
+              },
+              { key: 'notes', label: 'Notes', type: 'textarea' },
+            ]}
+            onChange={(rows) => updateScenario({ ...scenario, machineAssets: rows }, `Updated machine assets (${nowIso()})`)}
+            createRow={() => ({
+              id: crypto.randomUUID(),
+              name: 'New machine',
+              station: 'Final Assembly',
+              status: 'Available' as const,
+              notes: '',
+            })}
+          />
+        </div>
+      )}
+
+      {/* DECISIONS */}
+      {activeTab === 'Decisions' && (
+        <EditableTable
+          title="Top Planning Decisions"
+          rows={scenario.decisions}
+          columns={[
+            { key: 'title', label: 'Decision' },
+            { key: 'target', label: 'Target', type: 'textarea' },
+            { key: 'owner', label: 'Owner' },
+            {
+              key: 'status',
+              label: 'Status',
+              type: 'select',
+              options: [
+                { label: 'Not started', value: 'Not started' },
+                { label: 'In progress', value: 'In progress' },
+                { label: 'Blocked', value: 'Blocked' },
+                { label: 'Done', value: 'Done' },
+              ],
+            },
+            { key: 'notes', label: 'Notes', type: 'textarea' },
+          ]}
+          onChange={(rows) => updateScenario({ ...scenario, decisions: rows }, `Updated decisions (${nowIso()})`)}
+          createRow={() => ({
+            id: crypto.randomUUID(),
+            title: 'New decision',
+            target: '',
+            owner: '',
+            status: 'Not started' as const,
+            notes: '',
+          })}
+        />
       )}
 
       {/* INPUTS */}
       {activeTab === 'Inputs' && (
         <div className="card">
           <h3>Global Drivers (AUD)</h3>
-          <div className="hint" style={{ marginBottom: 8 }}>
-            If you only enter anything in one place, enter it here first. These drivers power everything else.
-          </div>
           <div className="header">
             {inputKeys.map((k) => {
               const v = scenario.inputs[k];
@@ -598,77 +556,49 @@ export default function App() {
 
       {/* INVENTORY */}
       {activeTab === 'Inventory' && (
-        <div>
-          <div className="card">
-            <h3>Inventory Exposure</h3>
-            <div className="small">
-              Pipeline: <b>{aud0.format(invTotals.pipelineValue)}</b> · Safety stock:{' '}
-              <b>{aud0.format(invTotals.safetyStockValue)}</b> · Total: <b>{aud0.format(invTotals.total)}</b>
-            </div>
-          </div>
-
-          <div className="card">
-            <h3>Reorder Points (units)</h3>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Item</th>
-                    <th>Lead Time (d)</th>
-                    <th>ROP (units)</th>
-                    <th>Pipeline (AUD)</th>
-                    <th>SS (AUD)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invExposure.map((r) => (
-                    <tr key={r.item}>
-                      <td>{r.item}</td>
-                      <td>{r.leadTimeDays}</td>
-                      <td>{Math.round(r.reorderPointUnits).toLocaleString()}</td>
-                      <td>{aud0.format(r.pipelineValue)}</td>
-                      <td>{aud0.format(r.safetyStockValue)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <EditableTable
-            title="Inventory & BOM (editable)"
-            rows={scenario.inventory}
-            columns={[
-              { key: 'name', label: 'Item' },
-              {
-                key: 'category',
-                label: 'Category',
-                type: 'select',
-                options: [
-                  { label: 'RM', value: 'RM' },
-                  { label: 'Component', value: 'Component' },
-                  { label: 'Packaging', value: 'Packaging' },
-                ],
-              },
-              { key: 'unitCost', label: 'Unit Cost (AUD)', type: 'number' },
-              { key: 'usagePerProduct', label: 'Usage/Product', type: 'number' },
-              { key: 'leadTimeDays', label: 'Lead Time (d)', type: 'number' },
-              { key: 'moq', label: 'MOQ', type: 'number' },
-              { key: 'singleSource', label: 'Single Source', type: 'checkbox' },
-            ]}
-            onChange={(rows) => updateScenario({ ...scenario, inventory: rows }, `Updated inventory (${nowIso()})`)}
-            createRow={() => ({
-              id: crypto.randomUUID(),
-              name: 'New item',
-              category: 'RM' as const,
-              unitCost: 0,
-              usagePerProduct: 1,
-              leadTimeDays: 0,
-              moq: 0,
-              singleSource: false,
-            })}
-          />
-        </div>
+        <EditableTable
+          title="Inventory & BOM + Stock (editable)"
+          rows={scenario.inventory}
+          columns={[
+            { key: 'name', label: 'Item' },
+            {
+              key: 'category',
+              label: 'Category',
+              type: 'select',
+              options: [
+                { label: 'RM', value: 'RM' },
+                { label: 'Component', value: 'Component' },
+                { label: 'Packaging', value: 'Packaging' },
+              ],
+            },
+            { key: 'unitCost', label: 'Unit Cost (AUD)', type: 'number' },
+            { key: 'usagePerProduct', label: 'Usage/Product', type: 'number' },
+            { key: 'onHandQty', label: 'On hand', type: 'number' },
+            { key: 'reorderPointQty', label: 'Reorder point', type: 'number' },
+            { key: 'minQty', label: 'Min', type: 'number' },
+            { key: 'leadTimeDays', label: 'Lead Time (d)', type: 'number' },
+            { key: 'moq', label: 'MOQ', type: 'number' },
+            { key: 'location', label: 'Location' },
+            { key: 'uom', label: 'UoM' },
+            { key: 'singleSource', label: 'Single Source', type: 'checkbox' },
+          ]}
+          onChange={(rows) => updateScenario({ ...scenario, inventory: rows }, `Updated inventory (${nowIso()})`)}
+          createRow={() => ({
+            id: crypto.randomUUID(),
+            name: 'New item',
+            category: 'RM' as const,
+            unitCost: 0,
+            usagePerProduct: 1,
+            leadTimeDays: 0,
+            moq: 0,
+            singleSource: false,
+            onHandQty: 0,
+            reorderPointQty: 0,
+            minQty: 0,
+            uom: 'pcs',
+            location: '',
+          })}
+        />
       )}
 
       {/* LOGISTICS */}
@@ -699,7 +629,7 @@ export default function App() {
           </div>
 
           <EditableTable
-            title="Transport Lanes (editable)"
+            title="Transport Lanes"
             rows={scenario.logistics}
             columns={[
               { key: 'lane', label: 'Lane' },
@@ -741,7 +671,7 @@ export default function App() {
       {/* MACHINES */}
       {activeTab === 'Machines' && (
         <EditableTable
-          title="Stations & Machines (editable)"
+          title="Stations & Machines"
           rows={scenario.machines}
           columns={[
             { key: 'station', label: 'Station' },
@@ -761,7 +691,7 @@ export default function App() {
       {/* WAREHOUSES */}
       {activeTab === 'Warehouses' && (
         <EditableTable
-          title="Warehouses (editable)"
+          title="Warehouses"
           rows={scenario.warehouses}
           columns={[
             { key: 'location', label: 'Location' },
@@ -793,7 +723,7 @@ export default function App() {
       {/* MAINTENANCE */}
       {activeTab === 'Maintenance' && (
         <EditableTable
-          title="Maintenance (editable)"
+          title="Maintenance"
           rows={scenario.maintenance}
           columns={[
             { key: 'machineType', label: 'Machine Type' },
@@ -835,7 +765,7 @@ export default function App() {
       {/* RISK */}
       {activeTab === 'Risk' && (
         <EditableTable
-          title="Risk Register (editable)"
+          title="Risk Register"
           rows={scenario.risks}
           columns={[
             { key: 'area', label: 'Area' },
@@ -871,19 +801,6 @@ export default function App() {
             Total cost/unit: <b>{aud.format(cost.total)}</b> · Margin/unit: <b>{aud.format(cost.marginPerUnit)}</b> · Margin:{' '}
             <b>{cost.marginPct.toFixed(1)}%</b>
           </div>
-
-          <h4>Cost breakdown (AUD / unit)</h4>
-          <ul className="small">
-            <li>Labour: {aud.format(cost.labour)}</li>
-            <li>Labour overhead: {aud.format(cost.labourOverhead)}</li>
-            <li>Material: {aud.format(cost.material)}</li>
-            <li>Logistics: {aud.format(cost.logistics)}</li>
-            <li>Warehouse: {aud.format(cost.warehouse)}</li>
-            <li>Maintenance: {aud.format(cost.maintenance)}</li>
-            <li>Holding: {aud.format(cost.holding)}</li>
-            <li>CAPEX depreciation: {aud.format(cost.capexDepreciation)}</li>
-            <li>Quality: {aud.format(cost.quality)}</li>
-          </ul>
 
           <div className="header">
             <button onClick={() => downloadFile(`${scenario.name}-inventory.csv`, inventoryCsv(scenario), 'text/csv')}>
