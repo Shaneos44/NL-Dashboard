@@ -2,19 +2,24 @@ import { ScenarioData, ScenarioName } from './types';
 
 const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
   name,
-  inputs: {
-    salePricePerUnit: 240,
-    monthlyDemand: demand,
-    availableMinutesPerMonth: 22 * 8 * 60,
-    labourRatePerHour: 28,
-    labourMinutesPerUnit: 18,
-    qualityCostPerUnit: 4.2,
-    oee: name === 'Pilot' ? 0.62 : name === 'Ramp' ? 0.74 : 0.83,
-    downtimePct: name === 'Pilot' ? 0.18 : name === 'Ramp' ? 0.12 : 0.08,
-    capexTotal: 1200000,
-    depreciationMonths: 60,
-    marginGuardrailPct: 25,
-  },
+inputs: {
+  salePricePerUnit: 240,
+  monthlyDemand: demand,
+  availableMinutesPerMonth: 22 * 8 * 60,
+  labourRatePerHour: 28,
+  labourMinutesPerUnit: 18,
+  qualityCostPerUnit: 4.2,
+  oee: ...,
+  downtimePct: ...,
+  capexTotal: 1200000,
+  depreciationMonths: 60,
+  marginGuardrailPct: 25,
+
+  scrapRatePct: name === 'Pilot' ? 0.06 : name === 'Ramp' ? 0.03 : 0.015,
+  overheadPct: 0.25,
+  holdingRatePctAnnual: 0.24,
+  safetyStockDays: name === 'Pilot' ? 21 : 14,
+},
   inventory: [
     { id: 'i1', name: 'Core PCB', category: 'Component', unitCost: 35, usagePerProduct: 1, leadTimeDays: 35, moq: 500, singleSource: true },
     { id: 'i2', name: 'Housing', category: 'RM', unitCost: 16, usagePerProduct: 1, leadTimeDays: 21, moq: 800, singleSource: false },
