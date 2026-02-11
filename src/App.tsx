@@ -71,6 +71,10 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function todayYmd(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(defaultState);
   const [activeTab, setActiveTab] = useState<Tab>('Executive Summary');
@@ -83,22 +87,36 @@ export default function App() {
     (async () => {
       const loaded = await loadState();
 
-      // Simple migration for older states (adds new arrays if missing)
+      // Lightweight migration for older states:
+      // - ensure new arrays exist
+      // - ensure inventory has onHandQty etc
+      // - ensure production runs have consumptionOverrides
       const patched = structuredClone(loaded) as any;
+
       (['Pilot', 'Ramp', 'Scale'] as ScenarioName[]).forEach((sn) => {
         const sc = patched.scenarios?.[sn];
         if (!sc) return;
+
         sc.people = Array.isArray(sc.people) ? sc.people : [];
         sc.machineAssets = Array.isArray(sc.machineAssets) ? sc.machineAssets : [];
         sc.production = Array.isArray(sc.production) ? sc.production : [];
-        sc.inventory = Array.isArray(sc.inventory) ? sc.inventory.map((it: any) => ({
-          ...it,
-          onHandQty: typeof it.onHandQty === 'number' ? it.onHandQty : 0,
-          reorderPointQty: typeof it.reorderPointQty === 'number' ? it.reorderPointQty : undefined,
-          minQty: typeof it.minQty === 'number' ? it.minQty : undefined,
-          uom: it.uom ?? 'pcs',
-          location: it.location ?? '',
-        })) : [];
+
+        sc.production = sc.production.map((r: any) => ({
+          ...r,
+          consumptionOverrides: typeof r?.consumptionOverrides === 'string' ? r.consumptionOverrides : '',
+        }));
+
+        sc.inventory = Array.isArray(sc.inventory)
+          ? sc.inventory.map((it: any) => ({
+              ...it,
+              onHandQty: typeof it.onHandQty === 'number' ? it.onHandQty : 0,
+              reorderPointQty: typeof it.reorderPointQty === 'number' ? it.reorderPointQty : undefined,
+              minQty: typeof it.minQty === 'number' ? it.minQty : undefined,
+              uom: typeof it.uom === 'string' ? it.uom : 'pcs',
+              location: typeof it.location === 'string' ? it.location : '',
+            }))
+          : [];
+
         sc.auditLog = Array.isArray(sc.auditLog) ? sc.auditLog : [];
       });
 
@@ -107,7 +125,10 @@ export default function App() {
         setLoading(false);
       }
     })();
-    return () => { mounted = false; };
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -137,13 +158,14 @@ export default function App() {
 
   const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
 
-  // NEW production/stock signals
   const completedUnits = useMemo(() => productionUnitsGoodCompleted(scenario), [scenario]);
   const stockView = useMemo(() => inventoryRemainingAfterProduction(scenario), [scenario]);
   const belowMinCount = stockView.filter((x) => x.status === 'Below Min').length;
   const reorderCount = stockView.filter((x) => x.status === 'Reorder').length;
 
-  const hasCapacityShortfall = capacityRows.some((r) => r.shortfallMachines > 0.0001);
+  const hasCapacityShortfall = capacityRows.some(
+    (r: { shortfallMachines: number }) => r.shortfallMachines > 0.0001
+  );
   const singleSourceCount = scenario.inventory.filter((i) => i.singleSource).length;
 
   const scenarios: ScenarioName[] = ['Pilot', 'Ramp', 'Scale'];
@@ -191,14 +213,20 @@ export default function App() {
           }
         >
           {scenarios.map((n) => (
-            <option key={n} value={n}>{n}</option>
+            <option key={n} value={n}>
+              {n}
+            </option>
           ))}
         </select>
 
         <button
           onClick={() => {
             const target: ScenarioName =
-              state.selectedScenario === 'Pilot' ? 'Ramp' : state.selectedScenario === 'Ramp' ? 'Scale' : 'Pilot';
+              state.selectedScenario === 'Pilot'
+                ? 'Ramp'
+                : state.selectedScenario === 'Ramp'
+                ? 'Scale'
+                : 'Pilot';
             setState(duplicateScenario(state, state.selectedScenario, target));
           }}
         >
@@ -211,12 +239,27 @@ export default function App() {
       </div>
 
       <div className="kpis">
-        <KpiCard label="Revenue / mo" value={aud0.format(scenario.inputs.salePricePerUnit * scenario.inputs.monthlyDemand)} />
-        <KpiCard label="Margin %" value={`${cost.marginPct.toFixed(1)}%`} tone={cost.marginPct > scenario.inputs.marginGuardrailPct ? 'good' : 'bad'} />
+        <KpiCard
+          label="Revenue / mo"
+          value={aud0.format(scenario.inputs.salePricePerUnit * scenario.inputs.monthlyDemand)}
+        />
+        <KpiCard
+          label="Margin %"
+          value={`${cost.marginPct.toFixed(1)}%`}
+          tone={cost.marginPct > scenario.inputs.marginGuardrailPct ? 'good' : 'bad'}
+        />
         <KpiCard label="Capacity" value={hasCapacityShortfall ? 'Shortfall' : 'OK'} tone={hasCapacityShortfall ? 'bad' : 'good'} />
         <KpiCard label="Completed units" value={completedUnits.toLocaleString()} />
-        <KpiCard label="Stock alerts" value={`${belowMinCount} below min / ${reorderCount} reorder`} tone={belowMinCount > 0 ? 'bad' : reorderCount > 0 ? 'warn' : 'good'} />
-        <KpiCard label="Single-source items" value={String(singleSourceCount)} tone={singleSourceCount > 0 ? 'warn' : 'good'} />
+        <KpiCard
+          label="Stock alerts"
+          value={`${belowMinCount} below min / ${reorderCount} reorder`}
+          tone={belowMinCount > 0 ? 'bad' : reorderCount > 0 ? 'warn' : 'good'}
+        />
+        <KpiCard
+          label="Single-source items"
+          value={String(singleSourceCount)}
+          tone={singleSourceCount > 0 ? 'warn' : 'good'}
+        />
       </div>
 
       <div className="tab-row">
@@ -233,12 +276,13 @@ export default function App() {
           <div className="card">
             <h3>Executive Snapshot</h3>
             <div className="small">
-              • Demand: <b>{scenario.inputs.monthlyDemand.toLocaleString()}</b> units/mo<br/>
-              • Total cost/unit: <b>{aud.format(cost.total)}</b><br/>
-              • Bottleneck: <b>{bottleneck ? bottleneck.station : '—'}</b><br/>
-              • FTE estimate: <b>{fte.toFixed(2)}</b><br/>
-              • Inventory exposure: <b>{aud0.format(invTotals.total)}</b><br/>
-              • Stock alerts: <b>{belowMinCount}</b> below min, <b>{reorderCount}</b> reorder
+              • Demand: <b>{scenario.inputs.monthlyDemand.toLocaleString()}</b> units/mo
+              <br />• Total cost/unit: <b>{aud.format(cost.total)}</b>
+              <br />• Bottleneck: <b>{bottleneck ? bottleneck.station : '—'}</b>
+              <br />• FTE estimate: <b>{fte.toFixed(2)}</b>
+              <br />• Inventory exposure: <b>{aud0.format(invTotals.total)}</b>
+              <br />• Stock alerts: <b>{belowMinCount}</b> below min, <b>{reorderCount}</b> reorder
+              <br />• Risk score: <b>{score}</b> · Six Pack yield: <b>{sixYield.toFixed(1)}%</b> · Takt: <b>{takt.toFixed(2)} min</b>
             </div>
           </div>
 
@@ -265,7 +309,11 @@ export default function App() {
           <div className="card">
             <h3>Production Schedule & Run Log</h3>
             <div className="hint">
-              Create runs, assign people + machines, mark status and record notes/observations. Completed units automatically consume stock.
+              Create runs, assign people + machines, mark status and record notes/observations.
+              <br />
+              Stock Take uses: (1) Actual Consumption Overrides for that run if provided, otherwise (2) BOM × unitsGood.
+              <br />
+              Overrides format (one per line): <code>Item Name, QtyConsumed</code> e.g. <code>Core PCB, 210</code>
             </div>
           </div>
 
@@ -297,11 +345,14 @@ export default function App() {
               },
               { key: 'notes', label: 'Notes', type: 'textarea' },
               { key: 'observations', label: 'Observations', type: 'textarea' },
+              { key: 'consumptionOverrides', label: 'Actual consumption overrides (Item,Qty)', type: 'textarea' },
             ]}
-            onChange={(rows) => updateScenario({ ...scenario, production: rows }, `Updated production runs (${nowIso()})`)}
+            onChange={(rows) =>
+              updateScenario({ ...scenario, production: rows }, `Updated production runs (${nowIso()})`)
+            }
             createRow={() => ({
               id: crypto.randomUUID(),
-              date: new Date().toISOString().slice(0, 10),
+              date: todayYmd(),
               startTime: '08:00',
               durationMin: 120,
               process: 'Final Assembly',
@@ -314,12 +365,15 @@ export default function App() {
               status: 'Planned' as const,
               notes: '',
               observations: '',
+              consumptionOverrides: '',
             })}
           />
 
           <div className="card">
             <h3>Machine Usage Quick View</h3>
-            <div className="hint">Update machine status in Resources tab. Use machine names in the run’s “Machines” field.</div>
+            <div className="hint">
+              Update machine status in Resources tab. Use machine names in the run’s “Machines” field.
+            </div>
             <div className="table-wrap">
               <table>
                 <thead>
@@ -340,7 +394,11 @@ export default function App() {
                     </tr>
                   ))}
                   {scenario.machineAssets.length === 0 && (
-                    <tr><td colSpan={4} className="small">No machine assets yet. Add them in Resources.</td></tr>
+                    <tr>
+                      <td colSpan={4} className="small">
+                        No machine assets yet. Add them in Resources.
+                      </td>
+                    </tr>
                   )}
                 </tbody>
               </table>
@@ -355,7 +413,8 @@ export default function App() {
           <div className="card">
             <h3>Stock Take</h3>
             <div className="small">
-              Completed production runs consume stock based on BOM usage. Remaining is calculated automatically.
+              Completed runs consume stock. If a run has overrides, those values are used for matching items; all others
+              fall back to BOM × unitsGood.
             </div>
           </div>
 
@@ -375,7 +434,7 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {stockView.map((r) => (
+                  {stockView.map((r: any) => (
                     <tr key={r.id}>
                       <td>{r.name}</td>
                       <td>{r.onHandQty.toLocaleString()}</td>
@@ -390,7 +449,7 @@ export default function App() {
               </table>
             </div>
             <div className="hint" style={{ marginTop: 8 }}>
-              To change stock, edit Inventory → onHandQty / reorderPointQty / minQty.
+              To adjust physical stock counts, edit Inventory → onHandQty / reorderPointQty / minQty.
             </div>
           </div>
         </div>
@@ -436,7 +495,9 @@ export default function App() {
               },
               { key: 'notes', label: 'Notes', type: 'textarea' },
             ]}
-            onChange={(rows) => updateScenario({ ...scenario, machineAssets: rows }, `Updated machine assets (${nowIso()})`)}
+            onChange={(rows) =>
+              updateScenario({ ...scenario, machineAssets: rows }, `Updated machine assets (${nowIso()})`)
+            }
             createRow={() => ({
               id: crypto.randomUUID(),
               name: 'New machine',
@@ -616,7 +677,7 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {laneSummary.map((l) => (
+                  {laneSummary.map((l: { lane: string; shipmentsPerMonth: number; costPerUnit: number }) => (
                     <tr key={l.lane}>
                       <td>{l.lane}</td>
                       <td>{l.shipmentsPerMonth.toFixed(2)}</td>
@@ -747,7 +808,7 @@ export default function App() {
         <div className="card">
           <h3>Six Pack Capability</h3>
           <ul className="small">
-            {scenario.sixPack.map((r) => {
+            {scenario.sixPack.map((r: any) => {
               const ev = evaluateSixPack(r);
               return (
                 <li key={r.id}>
@@ -802,13 +863,21 @@ export default function App() {
             <b>{cost.marginPct.toFixed(1)}%</b>
           </div>
 
+          <h4>Exports</h4>
           <div className="header">
             <button onClick={() => downloadFile(`${scenario.name}-inventory.csv`, inventoryCsv(scenario), 'text/csv')}>
               Export Inventory CSV
             </button>
+            <button onClick={() => downloadFile(`${scenario.name}-sixpack.csv`, sixPackCsv(scenario), 'text/csv')}>
+              Export Six Pack CSV
+            </button>
             <button onClick={() => downloadFile(`${scenario.name}.json`, exportScenarioJson(scenario), 'application/json')}>
               Export JSON
             </button>
+          </div>
+
+          <div className="hint" style={{ marginTop: 10 }}>
+            Inventory exposure (planning): {aud0.format(invTotals.total)} · Completed units (execution): {completedUnits.toLocaleString()}
           </div>
         </div>
       )}
