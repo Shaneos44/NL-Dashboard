@@ -3,7 +3,6 @@ import { ScenarioData, ScenarioName } from './types';
 const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
   name,
 
-  // REQUIRED (because types.ts now requires it)
   decisions: [
     {
       id: 'd1',
@@ -42,14 +41,14 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
     labourRatePerHour: 42, // AUD/hr
     labourMinutesPerUnit: 18,
 
-    qualityCostPerUnit: 6.5, // AUD/unit
+    qualityCostPerUnit: 6.5,
 
     scrapRatePct: name === 'Pilot' ? 0.06 : name === 'Ramp' ? 0.03 : 0.015,
     overheadPct: 0.25,
     holdingRatePctAnnual: 0.24,
     safetyStockDays: name === 'Pilot' ? 21 : 14,
 
-    capexTotal: 1400000, // AUD
+    capexTotal: 1400000,
     depreciationMonths: 60,
     marginGuardrailPct: 25,
   },
@@ -64,6 +63,11 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
       leadTimeDays: 35,
       moq: 500,
       singleSource: true,
+      onHandQty: 1800,
+      reorderPointQty: 1200,
+      minQty: 800,
+      uom: 'pcs',
+      location: 'RM-01',
     },
     {
       id: 'i2',
@@ -74,6 +78,11 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
       leadTimeDays: 21,
       moq: 800,
       singleSource: false,
+      onHandQty: 2600,
+      reorderPointQty: 1500,
+      minQty: 1000,
+      uom: 'pcs',
+      location: 'RM-02',
     },
     {
       id: 'i3',
@@ -84,32 +93,56 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
       leadTimeDays: 14,
       moq: 1000,
       singleSource: false,
+      onHandQty: 3400,
+      reorderPointQty: 2000,
+      minQty: 1500,
+      uom: 'pcs',
+      location: 'PK-01',
     },
   ],
 
   logistics: [
-    {
-      id: 'l1',
-      lane: 'Asia -> AU DC',
-      direction: 'Inbound',
-      mode: 'Sea',
-      costPerShipment: 5200,
-      unitsPerShipment: 2400,
-    },
-    {
-      id: 'l2',
-      lane: 'AU DC -> Customers',
-      direction: 'Outbound',
-      mode: 'Road',
-      costPerShipment: 950,
-      unitsPerShipment: 900,
-    },
+    { id: 'l1', lane: 'Asia -> AU DC', direction: 'Inbound', mode: 'Sea', costPerShipment: 5200, unitsPerShipment: 2400 },
+    { id: 'l2', lane: 'AU DC -> Customers', direction: 'Outbound', mode: 'Road', costPerShipment: 950, unitsPerShipment: 900 },
   ],
 
   machines: [
     { id: 'm1', station: 'SMT', cycleTimeSec: 42, machinesInstalled: 2 },
     { id: 'm2', station: 'Final Assembly', cycleTimeSec: 60, machinesInstalled: 3 },
     { id: 'm3', station: 'Test & Pack', cycleTimeSec: 55, machinesInstalled: 2 },
+  ],
+
+  machineAssets: [
+    { id: 'ma1', name: 'SMT #1', station: 'SMT', status: 'Available', notes: '' },
+    { id: 'ma2', name: 'SMT #2', station: 'SMT', status: 'Available', notes: '' },
+    { id: 'ma3', name: 'Assembly Line #1', station: 'Final Assembly', status: 'Available', notes: '' },
+    { id: 'ma4', name: 'Assembly Line #2', station: 'Final Assembly', status: 'Available', notes: '' },
+    { id: 'ma5', name: 'Test Bench #1', station: 'Test & Pack', status: 'Available', notes: '' },
+  ],
+
+  people: [
+    { id: 'p1', name: 'Operator A', role: 'Assembler', shift: 'Day', notes: '' },
+    { id: 'p2', name: 'Operator B', role: 'Test Tech', shift: 'Day', notes: '' },
+    { id: 'p3', name: 'Supervisor', role: 'Supervisor', shift: 'Day', notes: '' },
+  ],
+
+  production: [
+    {
+      id: 'pr1',
+      date: new Date().toISOString().slice(0, 10),
+      startTime: '08:00',
+      durationMin: 240,
+      process: 'Final Assembly',
+      workOrder: 'WO-001',
+      unitsPlanned: 200,
+      unitsGood: 0,
+      unitsScrap: 0,
+      assignedPeople: 'Operator A, Supervisor',
+      machinesUsed: 'Assembly Line #1',
+      status: 'Planned',
+      notes: '',
+      observations: '',
+    },
   ],
 
   warehouses: [
