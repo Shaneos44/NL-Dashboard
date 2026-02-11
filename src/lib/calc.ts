@@ -233,13 +233,68 @@ export function productionUnitsGoodCompleted(s: ScenarioData): number {
 }
 
 export function inventoryConsumptionFromProduction(s: ScenarioData): Record<string, number> {
-  const units = productionUnitsGoodCompleted(s);
-  const consumed: Record<string, number> = {};
-  for (const item of s.inventory) {
-    const perUnit = Number(item.usagePerProduct) || 0;
-    consumed[item.id] = units * perUnit;
+  const runs: any[] = (s as any).production ?? [];
+  const consumedById: Record<string, number> = {};
+
+  // init
+  for (const item of s.inventory) consumedById[item.id] = 0;
+
+  const findItemIdByName = (name: string) => {
+    const n = name.trim().toLowerCase();
+    const match = s.inventory.find((i) => i.name.trim().toLowerCase() === n);
+    return match?.id ?? null;
+  };
+
+  const addDefaultBomConsumption = (unitsGood: number) => {
+    for (const item of s.inventory) {
+      const perUnit = Number(item.usagePerProduct) || 0;
+      consumedById[item.id] += unitsGood * perUnit;
+    }
+  };
+
+  for (const r of runs) {
+    if (r?.status !== 'Complete') continue;
+
+    const unitsGood = Number(r.unitsGood) || 0;
+    const overridesText = String(r.consumptionOverrides ?? '').trim();
+
+    if (!overridesText) {
+      // no overrides → use BOM for all items
+      addDefaultBomConsumption(unitsGood);
+      continue;
+    }
+
+    // Start from BOM as baseline
+    const perRunConsumed: Record<string, number> = {};
+    for (const item of s.inventory) perRunConsumed[item.id] = unitsGood * (Number(item.usagePerProduct) || 0);
+
+    // Apply overrides line-by-line
+    // Format: "Item Name, QtyConsumed"
+    const lines = overridesText.split('\n').map((x: string) => x.trim()).filter(Boolean);
+
+    for (const line of lines) {
+      const parts = line.split(',').map((p: string) => p.trim());
+      if (parts.length < 2) continue;
+
+      const itemName = parts[0];
+      const qty = Number(parts[1]);
+
+      if (!Number.isFinite(qty)) continue;
+
+      const id = findItemIdByName(itemName);
+      if (!id) continue;
+
+      // Override means: set absolute consumption for that item for this run
+      perRunConsumed[id] = qty;
+    }
+
+    // Add per-run consumed into totals
+    for (const id of Object.keys(perRunConsumed)) {
+      consumedById[id] += perRunConsumed[id];
+    }
   }
-  return consumed;
+
+  return consumedById;
 }
 
 export function inventoryRemainingAfterProduction(s: ScenarioData): {
