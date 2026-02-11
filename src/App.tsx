@@ -5,7 +5,7 @@ import './components/styles.css';
 import { EditableTable } from './components/EditableTable';
 import { KpiCard } from './components/KpiCard';
 
-import type { GlobalInputs, ScenarioName } from './lib/types';
+import type { GlobalInputs, ScenarioName, PlanningDecision } from './lib/types';
 import type { AppState } from './lib/store';
 
 import {
@@ -33,7 +33,7 @@ import {
 } from './lib/store';
 
 const tabs = [
-  'How to use',
+  'Executive Summary',
   'Decisions',
   'Inputs',
   'Processes',
@@ -62,20 +62,81 @@ function downloadFile(filename: string, content: string, type: string) {
   URL.revokeObjectURL(url);
 }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function defaultDecisions(): PlanningDecision[] {
+  return [
+    {
+      id: crypto.randomUUID(),
+      title: 'Capacity: how many machines & when?',
+      target: 'No station > 85% utilization at target demand',
+      owner: '',
+      status: 'Not started',
+      notes: '',
+    },
+    {
+      id: crypto.randomUUID(),
+      title: 'People: how many FTE & what roles?',
+      target: 'Staffing plan supports ramp without overtime risk',
+      owner: '',
+      status: 'Not started',
+      notes: '',
+    },
+    {
+      id: crypto.randomUUID(),
+      title: 'Supply chain: what to order & when?',
+      target: 'No stockouts with defined safety stock policy',
+      owner: '',
+      status: 'Not started',
+      notes: '',
+    },
+  ];
+}
+
+type RAG = 'Green' | 'Amber' | 'Red';
+
+function ragFromFlags(flags: { red: number; amber: number }) : RAG {
+  if (flags.red > 0) return 'Red';
+  if (flags.amber > 0) return 'Amber';
+  return 'Green';
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(defaultState);
-  const [activeTab, setActiveTab] = useState<Tab>('How to use');
+  const [activeTab, setActiveTab] = useState<Tab>('Executive Summary');
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
   const hydrated = useRef(false);
+
+  // One-time migration so older saved states don't break new required fields
+  const migratedRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       const loaded = await loadState();
+
+      // MIGRATION: ensure decisions exists in every scenario
+      const patched = structuredClone(loaded);
+      let changed = false;
+
+      (['Pilot', 'Ramp', 'Scale'] as ScenarioName[]).forEach((sn) => {
+        const sc: any = patched.scenarios[sn];
+        if (!sc.decisions || !Array.isArray(sc.decisions) || sc.decisions.length === 0) {
+          sc.decisions = defaultDecisions();
+          sc.auditLog = [...(sc.auditLog ?? []), `Auto-migration: added Decisions (${nowIso()})`];
+          changed = true;
+        }
+      });
+
       if (mounted) {
-        setState(loaded);
+        setState(patched);
         setLoading(false);
+
+        // If migrated, save once so it doesn't keep happening
+        if (changed) migratedRef.current = true;
       }
     })();
     return () => {
@@ -88,13 +149,22 @@ export default function App() {
       hydrated.current = true;
       return;
     }
+
     setSyncStatus('syncing');
     void saveState(state)
       .then(() => setSyncStatus('synced'))
       .catch(() => setSyncStatus('error'));
   }, [loading, state]);
 
+  // After first save, clear migrated flag (prevents extra logs)
+  useEffect(() => {
+    if (migratedRef.current && syncStatus === 'synced') migratedRef.current = false;
+  }, [syncStatus]);
+
   const scenario = state.scenarios[state.selectedScenario];
+
+  // Defensive: if still missing for any reason, provide a non-crashing default
+  const decisions = scenario.decisions && scenario.decisions.length > 0 ? scenario.decisions : defaultDecisions();
 
   const cost = useMemo(() => computeCostBreakdown(scenario), [scenario]);
   const takt = useMemo(() => computeTaktTimeMinutes(scenario), [scenario]);
@@ -107,13 +177,7 @@ export default function App() {
 
   const invExposure = useMemo(() => computeInventoryExposure(scenario), [scenario]);
   const invTotals = useMemo(() => inventoryExposureTotals(scenario), [scenario]);
-
   const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
-
-  const hasCapacityShortfall = capacityRows.some((r) => r.shortfallMachines > 0.0001);
-  const singleSourceCount = scenario.inventory.filter((i) => i.singleSource).length;
-
-  const inputKeys = Object.keys(scenario.inputs) as (keyof GlobalInputs)[];
 
   const scenarios: ScenarioName[] = ['Pilot', 'Ramp', 'Scale'];
 
@@ -126,6 +190,8 @@ export default function App() {
     }));
   };
 
+  const inputKeys = Object.keys(scenario.inputs) as (keyof GlobalInputs)[];
+
   const marginCurve = useMemo(() => {
     return [0.5, 0.75, 1, 1.25, 1.5].map((mult) => {
       const demand = Math.round(scenario.inputs.monthlyDemand * mult);
@@ -135,11 +201,124 @@ export default function App() {
     });
   }, [scenario]);
 
+  // Executive-grade “signals”
+  const hasCapacityShortfall = capacityRows.some((r) => r.shortfallMachines > 0.0001);
+  const worstUtil = bottleneck ? bottleneck.utilizationPct : 0;
+  const singleSourceCount = scenario.inventory.filter((i) => i.singleSource).length;
+  const warehouseOver = scenario.warehouses.filter((w) => w.utilizationPct > (w.capacityPctLimit ?? 0.85)).length;
+  const sixFailCount = scenario.sixPack.filter((r) => !evaluateSixPack(r).pass).length;
+
+  const flags = {
+    red: 0,
+    amber: 0,
+  };
+
+  // Margin guardrail
+  if (cost.marginPct < scenario.inputs.marginGuardrailPct) flags.red += 1;
+
+  // Capacity
+  if (hasCapacityShortfall) flags.red += 1;
+  else if (worstUtil > 80) flags.amber += 1;
+
+  // Supply risk
+  if (singleSourceCount >= 3) flags.amber += 1;
+  if (singleSourceCount >= 6) flags.red += 1;
+
+  // Warehouse
+  if (warehouseOver > 0) flags.amber += 1;
+
+  // Quality capability
+  if (sixFailCount > 0) flags.amber += 1;
+  if (sixFailCount >= 3) flags.red += 1;
+
+  const overallRag = ragFromFlags(flags);
+
+  const topActions = useMemo(() => {
+    const actions: { rag: RAG; title: string; detail: string; goto: Tab }[] = [];
+
+    if (cost.marginPct < scenario.inputs.marginGuardrailPct) {
+      actions.push({
+        rag: 'Red',
+        title: 'Margin below guardrail',
+        detail: `Margin ${cost.marginPct.toFixed(1)}% vs guardrail ${scenario.inputs.marginGuardrailPct}% — review inputs, BOM costs, logistics, holding/scrap.`,
+        goto: 'Summary / Export',
+      });
+    }
+
+    if (hasCapacityShortfall) {
+      actions.push({
+        rag: 'Red',
+        title: 'Capacity shortfall',
+        detail: bottleneck
+          ? `Bottleneck ${bottleneck.station} at ${bottleneck.utilizationPct.toFixed(1)}% util — add machines or reduce cycle time/OEE assumptions.`
+          : 'One or more stations require more machines than installed.',
+        goto: 'Processes',
+      });
+    }
+
+    if (fte > 1.2) {
+      actions.push({
+        rag: 'Amber',
+        title: 'High staffing load',
+        detail: `Estimated FTE ${fte.toFixed(2)} — verify labour minutes/unit and shift assumptions.`,
+        goto: 'Inputs',
+      });
+    }
+
+    if (singleSourceCount > 0) {
+      actions.push({
+        rag: 'Amber',
+        title: 'Single-source items',
+        detail: `${singleSourceCount} item(s) flagged — add mitigation owners + dual-source plan.`,
+        goto: 'Risk',
+      });
+    }
+
+    if (invTotals.total > 250000) {
+      actions.push({
+        rag: 'Amber',
+        title: 'Inventory cash exposure high',
+        detail: `Pipeline + safety stock ≈ ${aud0.format(invTotals.total)} — reduce lead times, safety stock days, or increase shipment cadence.`,
+        goto: 'Inventory',
+      });
+    }
+
+    if (warehouseOver > 0) {
+      actions.push({
+        rag: 'Amber',
+        title: 'Warehouse utilization over limit',
+        detail: `${warehouseOver} warehouse(s) over threshold — adjust utilization/limit or capacity strategy.`,
+        goto: 'Warehouses',
+      });
+    }
+
+    if (sixFailCount > 0) {
+      actions.push({
+        rag: 'Amber',
+        title: 'Six Pack capability gaps',
+        detail: `${sixFailCount} failing metric(s) — focus improvement on top CTQs.`,
+        goto: 'Six Pack',
+      });
+    }
+
+    return actions.slice(0, 6);
+  }, [
+    cost.marginPct,
+    scenario.inputs.marginGuardrailPct,
+    hasCapacityShortfall,
+    bottleneck,
+    fte,
+    singleSourceCount,
+    invTotals.total,
+    warehouseOver,
+    sixFailCount,
+  ]);
+
   if (loading) {
     return (
       <div className="app">
         <h1>Ops & Planning Dashboard</h1>
-        <div className="card">Loading scenario data…</div>
+        <div className="card">Loading…</div>
       </div>
     );
   }
@@ -148,15 +327,13 @@ export default function App() {
     <div className="app">
       <h1>Ops & Planning Dashboard</h1>
       <div className="small">
-        Currency: <b>AUD</b> · Data sync: {syncStatus}
+        Currency: <b>AUD</b> · Sync: {syncStatus}
       </div>
 
       <div className="header">
         <select
           value={state.selectedScenario}
-          onChange={(e) =>
-            setState((s: AppState) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))
-          }
+          onChange={(e) => setState((s) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))}
         >
           {scenarios.map((n) => (
             <option key={n} value={n}>
@@ -168,7 +345,11 @@ export default function App() {
         <button
           onClick={() => {
             const target: ScenarioName =
-              state.selectedScenario === 'Pilot' ? 'Ramp' : state.selectedScenario === 'Ramp' ? 'Scale' : 'Pilot';
+              state.selectedScenario === 'Pilot'
+                ? 'Ramp'
+                : state.selectedScenario === 'Ramp'
+                ? 'Scale'
+                : 'Pilot';
             setState(duplicateScenario(state, state.selectedScenario, target));
           }}
         >
@@ -177,6 +358,12 @@ export default function App() {
 
         <button onClick={() => downloadFile(`${scenario.name}.json`, exportScenarioJson(scenario), 'application/json')}>
           Export JSON
+        </button>
+        <button onClick={() => downloadFile(`${scenario.name}-inventory.csv`, inventoryCsv(scenario), 'text/csv')}>
+          Export Inventory CSV
+        </button>
+        <button onClick={() => downloadFile(`${scenario.name}-sixpack.csv`, sixPackCsv(scenario), 'text/csv')}>
+          Export Six Pack CSV
         </button>
       </div>
 
@@ -193,50 +380,7 @@ export default function App() {
         />
         <KpiCard label="Takt time" value={`${takt.toFixed(2)} min`} tone={takt > 0.4 ? 'warn' : 'good'} />
         <KpiCard label="Risk score" value={String(score)} tone={score > 60 ? 'bad' : score > 35 ? 'warn' : 'good'} />
-        <KpiCard label="Six Pack yield" value={`${sixYield.toFixed(1)}%`} tone={sixYield > 80 ? 'good' : 'warn'} />
-      </div>
-
-      <div className="layout-grid">
-        <div className="card">
-          <h3>Margin Curve vs Volume</h3>
-          <div style={{ width: '100%', height: 240 }}>
-            <ResponsiveContainer>
-              <LineChart data={marginCurve}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="volume" />
-                <YAxis unit="%" />
-                <Tooltip />
-                <Line type="monotone" dataKey="marginPct" strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="hint">Tip: if margin is wrong, update unit costs, labour minutes, logistics, and holding/scrap in Inputs.</div>
-        </div>
-
-        <div className="card">
-          <h3>What’s breaking?</h3>
-          <div className={`badge ${cost.marginPct < scenario.inputs.marginGuardrailPct ? 'bad' : 'good'}`}>
-            Margin guardrail {cost.marginPct < scenario.inputs.marginGuardrailPct ? 'breached' : 'healthy'}
-          </div>{' '}
-          <div className={`badge ${hasCapacityShortfall ? 'bad' : 'good'}`}>
-            Capacity {hasCapacityShortfall ? 'shortfall' : 'OK'}
-          </div>{' '}
-          <div className={`badge ${singleSourceCount > 0 ? 'warn' : 'good'}`}>
-            Single-source items: {singleSourceCount}
-          </div>
-          <hr />
-          {bottleneck ? (
-            <div className="small">
-              Bottleneck: <b>{bottleneck.station}</b> ({bottleneck.utilizationPct.toFixed(1)}% util)
-            </div>
-          ) : (
-            <div className="small">No stations defined yet.</div>
-          )}
-          <div className="small">
-            Inventory exposure (pipeline + safety): <b>{aud0.format(invTotals.total)}</b>
-          </div>
-          <div className="hint">Go to Decisions → set your 3 questions, then fill Inputs + tables until alerts go green.</div>
-        </div>
+        <KpiCard label="Inventory exposure" value={aud0.format(invTotals.total)} tone={invTotals.total > 250000 ? 'warn' : 'good'} />
       </div>
 
       <div className="tab-row">
@@ -247,25 +391,85 @@ export default function App() {
         ))}
       </div>
 
-      {/* HOW TO USE */}
-      {activeTab === 'How to use' && (
-        <div className="card">
-          <h3>How to use this dashboard (fast)</h3>
-          <ol>
-            <li>
-              <b>Decisions:</b> define your 3 planning questions (capacity / people / supply). Add an owner + target.
-            </li>
-            <li>
-              <b>Inputs:</b> set demand, price, labour minutes, OEE, scrap, holding, safety stock.
-            </li>
-            <li>
-              <b>Fill the tables:</b> Inventory (BOM), Machines (stations), Logistics (lanes), Warehouses & Maintenance.
-              The dashboard then shows bottlenecks, required capacity, inventory exposure, and lane costs.
-            </li>
-          </ol>
-          <hr />
-          <div className="small">
-            Recommended workflow: <b>Inputs → Machines → Inventory → Logistics</b>, then check <b>Processes</b> and <b>Summary</b>.
+      {/* EXECUTIVE SUMMARY */}
+      {activeTab === 'Executive Summary' && (
+        <div>
+          <div className="layout-grid">
+            <div className="card">
+              <h3>Executive Snapshot</h3>
+              <div className={`badge ${overallRag === 'Green' ? 'good' : overallRag === 'Amber' ? 'warn' : 'bad'}`}>
+                Overall status: <b>{overallRag}</b>
+              </div>{' '}
+              <div className="badge">
+                Demand: <b>{scenario.inputs.monthlyDemand.toLocaleString()}</b> units/mo
+              </div>{' '}
+              <div className="badge">
+                Bottleneck: <b>{bottleneck ? bottleneck.station : '—'}</b>
+              </div>
+              <hr />
+              <div className="small">
+                • Margin: <b>{cost.marginPct.toFixed(1)}%</b> ({aud.format(cost.marginPerUnit)} / unit)
+              </div>
+              <div className="small">
+                • Capacity: <b>{hasCapacityShortfall ? 'Shortfall' : 'OK'}</b>{' '}
+                {bottleneck ? `(${bottleneck.utilizationPct.toFixed(1)}% util)` : ''}
+              </div>
+              <div className="small">
+                • People: <b>{fte.toFixed(2)} FTE</b> estimated
+              </div>
+              <div className="small">
+                • Supply risk: <b>{singleSourceCount}</b> single-source item(s)
+              </div>
+              <div className="small">
+                • Cash tied up: <b>{aud0.format(invTotals.total)}</b> (pipeline + safety)
+              </div>
+              <div className="hint" style={{ marginTop: 10 }}>
+                “Executive Summary” is designed to be screenshot-ready for SLT/ELT.
+              </div>
+            </div>
+
+            <div className="card">
+              <h3>Top Actions (auto)</h3>
+              {topActions.length === 0 ? (
+                <div className="small">No major actions flagged.</div>
+              ) : (
+                <ul className="small">
+                  {topActions.map((a, idx) => (
+                    <li key={idx} style={{ marginBottom: 10 }}>
+                      <span className={`badge ${a.rag === 'Green' ? 'good' : a.rag === 'Amber' ? 'warn' : 'bad'}`}>
+                        {a.rag}
+                      </span>{' '}
+                      <b>{a.title}</b>
+                      <div className="hint">{a.detail}</div>
+                      <button style={{ marginTop: 6 }} onClick={() => setActiveTab(a.goto)}>
+                        Open: {a.goto}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <h3>Margin Curve vs Volume</h3>
+            <div style={{ width: '100%', height: 240 }}>
+              <ResponsiveContainer>
+                <LineChart data={[0.5, 0.75, 1, 1.25, 1.5].map((mult) => {
+                  const demand = Math.round(scenario.inputs.monthlyDemand * mult);
+                  const tmp = { ...scenario, inputs: { ...scenario.inputs, monthlyDemand: demand } };
+                  const res = computeCostBreakdown(tmp);
+                  return { volume: demand, marginPct: Number(res.marginPct.toFixed(1)) };
+                })}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="volume" />
+                  <YAxis unit="%" />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="marginPct" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="hint">If the curve looks wrong, update: BOM unit costs, labour minutes/unit, logistics, holding/scrap.</div>
           </div>
         </div>
       )}
@@ -274,8 +478,8 @@ export default function App() {
       {activeTab === 'Decisions' && (
         <div>
           <EditableTable
-            title="Top 3 Planning Decisions (editable)"
-            rows={scenario.decisions}
+            title="Top Planning Decisions (editable)"
+            rows={decisions}
             columns={[
               { key: 'title', label: 'Decision / Question' },
               { key: 'target', label: 'Target / Definition of done', type: 'textarea' },
@@ -293,7 +497,9 @@ export default function App() {
               },
               { key: 'notes', label: 'Notes', type: 'textarea' },
             ]}
-            onChange={(rows) => updateScenario({ ...scenario, decisions: rows }, 'Updated decisions')}
+            onChange={(rows) =>
+              updateScenario({ ...scenario, decisions: rows }, `Updated Decisions (${nowIso()})`)
+            }
             createRow={() => ({
               id: crypto.randomUUID(),
               title: 'New decision',
@@ -305,12 +511,11 @@ export default function App() {
           />
 
           <div className="card">
-            <h3>Helpful links (what answers what)</h3>
+            <h3>How this becomes “exec-ready”</h3>
             <ul className="small">
-              <li><b>Capacity & bottlenecks:</b> Processes + Machines</li>
-              <li><b>People / labour load:</b> Processes (FTE estimate) + Inputs</li>
-              <li><b>Supply chain orders & cash tied up:</b> Inventory exposure + Inventory table + Logistics</li>
-              <li><b>Margin and cost drivers:</b> Summary / Export + Inputs</li>
+              <li>Set the 3 decisions above (owners + targets).</li>
+              <li>Fill Inputs + the core tables (Machines, Inventory, Logistics).</li>
+              <li>Executive Summary auto-flags issues and produces a short “Top Actions” list.</li>
             </ul>
           </div>
         </div>
@@ -320,6 +525,9 @@ export default function App() {
       {activeTab === 'Inputs' && (
         <div className="card">
           <h3>Global Drivers (AUD)</h3>
+          <div className="hint" style={{ marginBottom: 8 }}>
+            If you only enter anything in one place, enter it here first. These drivers power everything else.
+          </div>
           <div className="header">
             {inputKeys.map((k) => {
               const v = scenario.inputs[k];
@@ -332,16 +540,13 @@ export default function App() {
                     onChange={(e) =>
                       updateScenario(
                         { ...scenario, inputs: { ...scenario.inputs, [k]: Number(e.target.value) } },
-                        `Updated input ${String(k)}`
+                        `Updated input ${String(k)} (${nowIso()})`
                       )
                     }
                   />
                 </label>
               );
             })}
-          </div>
-          <div className="hint" style={{ marginTop: 8 }}>
-            Tip: keep utilization fields as 0..1. Set safetyStockDays + holdingRatePctAnnual for realistic inventory cost/exposure.
           </div>
         </div>
       )}
@@ -350,39 +555,40 @@ export default function App() {
       {activeTab === 'Processes' && (
         <div className="card">
           <h3>Capacity & Bottleneck</h3>
-
           {bottleneck && (
             <div className="small">
               Bottleneck: <b>{bottleneck.station}</b> ({bottleneck.utilizationPct.toFixed(1)}% utilization)
             </div>
           )}
 
-          <table>
-            <thead>
-              <tr>
-                <th>Station</th>
-                <th>Cycle (s)</th>
-                <th>Installed</th>
-                <th>Capacity/mo</th>
-                <th>Util %</th>
-                <th>Req Machines</th>
-                <th>Shortfall</th>
-              </tr>
-            </thead>
-            <tbody>
-              {capacityRows.map((r) => (
-                <tr key={r.station}>
-                  <td>{r.station}</td>
-                  <td>{r.cycleTimeSec}</td>
-                  <td>{r.installed}</td>
-                  <td>{Math.round(r.capacityUnitsPerMonth).toLocaleString()}</td>
-                  <td>{r.utilizationPct.toFixed(1)}%</td>
-                  <td>{r.requiredMachines.toFixed(2)}</td>
-                  <td>{r.shortfallMachines > 0 ? `+${r.shortfallMachines.toFixed(2)}` : '—'}</td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Station</th>
+                  <th>Cycle (s)</th>
+                  <th>Installed</th>
+                  <th>Capacity/mo</th>
+                  <th>Util %</th>
+                  <th>Req Machines</th>
+                  <th>Shortfall</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {capacityRows.map((r) => (
+                  <tr key={r.station}>
+                    <td>{r.station}</td>
+                    <td>{r.cycleTimeSec}</td>
+                    <td>{r.installed}</td>
+                    <td>{Math.round(r.capacityUnitsPerMonth).toLocaleString()}</td>
+                    <td>{r.utilizationPct.toFixed(1)}%</td>
+                    <td>{r.requiredMachines.toFixed(2)}</td>
+                    <td>{r.shortfallMachines > 0 ? `+${r.shortfallMachines.toFixed(2)}` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <div className="small" style={{ marginTop: 12 }}>
             Staffing estimate (FTE): <b>{fte.toFixed(2)}</b>
@@ -394,38 +600,39 @@ export default function App() {
       {activeTab === 'Inventory' && (
         <div>
           <div className="card">
-            <h3>Inventory exposure (cash tied up)</h3>
+            <h3>Inventory Exposure</h3>
             <div className="small">
-              Pipeline: <b>{aud0.format(invTotals.pipelineValue)}</b> · Safety stock: <b>{aud0.format(invTotals.safetyStockValue)}</b> · Total:{' '}
-              <b>{aud0.format(invTotals.total)}</b>
+              Pipeline: <b>{aud0.format(invTotals.pipelineValue)}</b> · Safety stock:{' '}
+              <b>{aud0.format(invTotals.safetyStockValue)}</b> · Total: <b>{aud0.format(invTotals.total)}</b>
             </div>
-            <div className="hint">Use this to set safetyStockDays and lead times; it directly affects cash tied up.</div>
           </div>
 
           <div className="card">
             <h3>Reorder Points (units)</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th>Lead Time (d)</th>
-                  <th>ROP (units)</th>
-                  <th>Pipeline (AUD)</th>
-                  <th>SS (AUD)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invExposure.map((r) => (
-                  <tr key={r.item}>
-                    <td>{r.item}</td>
-                    <td>{r.leadTimeDays}</td>
-                    <td>{Math.round(r.reorderPointUnits).toLocaleString()}</td>
-                    <td>{aud0.format(r.pipelineValue)}</td>
-                    <td>{aud0.format(r.safetyStockValue)}</td>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Lead Time (d)</th>
+                    <th>ROP (units)</th>
+                    <th>Pipeline (AUD)</th>
+                    <th>SS (AUD)</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {invExposure.map((r) => (
+                    <tr key={r.item}>
+                      <td>{r.item}</td>
+                      <td>{r.leadTimeDays}</td>
+                      <td>{Math.round(r.reorderPointUnits).toLocaleString()}</td>
+                      <td>{aud0.format(r.pipelineValue)}</td>
+                      <td>{aud0.format(r.safetyStockValue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <EditableTable
@@ -449,7 +656,7 @@ export default function App() {
               { key: 'moq', label: 'MOQ', type: 'number' },
               { key: 'singleSource', label: 'Single Source', type: 'checkbox' },
             ]}
-            onChange={(rows) => updateScenario({ ...scenario, inventory: rows }, 'Updated inventory')}
+            onChange={(rows) => updateScenario({ ...scenario, inventory: rows }, `Updated inventory (${nowIso()})`)}
             createRow={() => ({
               id: crypto.randomUUID(),
               name: 'New item',
@@ -468,25 +675,27 @@ export default function App() {
       {activeTab === 'Logistics/Lanes' && (
         <div>
           <div className="card">
-            <h3>Lane summary</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>Lane</th>
-                  <th>Shipments/mo</th>
-                  <th>Cost/unit (AUD)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {laneSummary.map((l) => (
-                  <tr key={l.lane}>
-                    <td>{l.lane}</td>
-                    <td>{l.shipmentsPerMonth.toFixed(2)}</td>
-                    <td>{aud.format(l.costPerUnit)}</td>
+            <h3>Lane Summary</h3>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Lane</th>
+                    <th>Shipments/mo</th>
+                    <th>Cost/unit (AUD)</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {laneSummary.map((l) => (
+                    <tr key={l.lane}>
+                      <td>{l.lane}</td>
+                      <td>{l.shipmentsPerMonth.toFixed(2)}</td>
+                      <td>{aud.format(l.costPerUnit)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <EditableTable
@@ -516,7 +725,7 @@ export default function App() {
               { key: 'costPerShipment', label: 'Cost/Shipment (AUD)', type: 'number' },
               { key: 'unitsPerShipment', label: 'Units/Shipment', type: 'number' },
             ]}
-            onChange={(rows) => updateScenario({ ...scenario, logistics: rows }, 'Updated logistics')}
+            onChange={(rows) => updateScenario({ ...scenario, logistics: rows }, `Updated logistics (${nowIso()})`)}
             createRow={() => ({
               id: crypto.randomUUID(),
               lane: 'New Lane',
@@ -539,7 +748,7 @@ export default function App() {
             { key: 'cycleTimeSec', label: 'Cycle Time (s)', type: 'number' },
             { key: 'machinesInstalled', label: 'Installed', type: 'number' },
           ]}
-          onChange={(rows) => updateScenario({ ...scenario, machines: rows }, 'Updated machines')}
+          onChange={(rows) => updateScenario({ ...scenario, machines: rows }, `Updated machines (${nowIso()})`)}
           createRow={() => ({
             id: crypto.randomUUID(),
             station: 'New station',
@@ -569,7 +778,7 @@ export default function App() {
             { key: 'utilizationPct', label: 'Util (0..1)', type: 'number' },
             { key: 'capacityPctLimit', label: 'Limit (0..1)', type: 'number' },
           ]}
-          onChange={(rows) => updateScenario({ ...scenario, warehouses: rows }, 'Updated warehouses')}
+          onChange={(rows) => updateScenario({ ...scenario, warehouses: rows }, `Updated warehouses (${nowIso()})`)}
           createRow={() => ({
             id: crypto.randomUUID(),
             location: 'New DC',
@@ -592,7 +801,7 @@ export default function App() {
             { key: 'sparesCostPerMonth', label: 'Spares/mo (AUD)', type: 'number' },
             { key: 'serviceCostPerMonth', label: 'Service/mo (AUD)', type: 'number' },
           ]}
-          onChange={(rows) => updateScenario({ ...scenario, maintenance: rows }, 'Updated maintenance')}
+          onChange={(rows) => updateScenario({ ...scenario, maintenance: rows }, `Updated maintenance (${nowIso()})`)}
           createRow={() => ({
             id: crypto.randomUUID(),
             machineType: 'New',
@@ -607,7 +816,6 @@ export default function App() {
       {activeTab === 'Six Pack' && (
         <div className="card">
           <h3>Six Pack Capability</h3>
-          <div className="hint">This is a quick capability signal. For a real system you’d add measurement system + sampling plan.</div>
           <ul className="small">
             {scenario.sixPack.map((r) => {
               const ev = evaluateSixPack(r);
@@ -618,7 +826,6 @@ export default function App() {
               );
             })}
           </ul>
-
           <button onClick={() => downloadFile(`${scenario.name}-sixpack.csv`, sixPackCsv(scenario), 'text/csv')}>
             Export Six Pack CSV
           </button>
@@ -645,7 +852,7 @@ export default function App() {
             { key: 'mitigation', label: 'Mitigation', type: 'textarea' },
             { key: 'owner', label: 'Owner' },
           ]}
-          onChange={(rows) => updateScenario({ ...scenario, risks: rows }, 'Updated risks')}
+          onChange={(rows) => updateScenario({ ...scenario, risks: rows }, `Updated risks (${nowIso()})`)}
           createRow={() => ({
             id: crypto.randomUUID(),
             area: 'New area',
@@ -661,7 +868,8 @@ export default function App() {
         <div className="card">
           <h3>Summary</h3>
           <div className="small">
-            Total cost/unit: <b>{aud.format(cost.total)}</b> · Margin/unit: <b>{aud.format(cost.marginPerUnit)}</b> · Margin: <b>{cost.marginPct.toFixed(1)}%</b>
+            Total cost/unit: <b>{aud.format(cost.total)}</b> · Margin/unit: <b>{aud.format(cost.marginPerUnit)}</b> · Margin:{' '}
+            <b>{cost.marginPct.toFixed(1)}%</b>
           </div>
 
           <h4>Cost breakdown (AUD / unit)</h4>
