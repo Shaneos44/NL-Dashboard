@@ -2,15 +2,15 @@ export type ScenarioName = 'Pilot' | 'Ramp' | 'Scale';
 
 export interface PlanningDecision {
   id: string;
-  title: string;          // e.g. "How many machines & when?"
-  target: string;         // e.g. "No capacity shortfall for next 6 months"
-  owner: string;          // optional
+  title: string;
+  target: string;
+  owner: string;
   status: 'Not started' | 'In progress' | 'Blocked' | 'Done';
-  notes: string;          // free text
+  notes: string;
 }
 
 export interface GlobalInputs {
-  // NOTE: currency is AUD (display only)
+  // Currency display: AUD
   salePricePerUnit: number;
   monthlyDemand: number;
 
@@ -23,10 +23,10 @@ export interface GlobalInputs {
 
   qualityCostPerUnit: number;
 
-  scrapRatePct?: number;           // 0.05 = 5%
-  overheadPct?: number;            // 0.25 = 25%
-  holdingRatePctAnnual?: number;   // 0.24 = 24%
-  safetyStockDays?: number;        // e.g. 14
+  scrapRatePct?: number; // 0.05 = 5%
+  overheadPct?: number; // 0.25 = 25%
+  holdingRatePctAnnual?: number; // 0.24 = 24%
+  safetyStockDays?: number; // e.g. 14
 
   capexTotal: number;
   depreciationMonths: number;
@@ -38,10 +38,17 @@ export interface InventoryItem {
   name: string;
   category: 'RM' | 'Component' | 'Packaging';
   unitCost: number;
-  usagePerProduct: number;
+  usagePerProduct: number; // BOM usage per finished good
   leadTimeDays: number;
   moq: number;
   singleSource: boolean;
+
+  // NEW: stock tracking
+  onHandQty: number; // physical stock on hand
+  reorderPointQty?: number; // optional manual reorder point
+  minQty?: number; // optional minimum on hand
+  uom?: string; // e.g. "pcs", "m", "L"
+  location?: string; // bin/location
 }
 
 export interface LogisticsLane {
@@ -58,6 +65,22 @@ export interface MachineStation {
   station: string;
   cycleTimeSec: number;
   machinesInstalled: number;
+}
+
+export interface MachineAsset {
+  id: string;
+  name: string; // e.g. "SMT #1"
+  station: string; // link to station name
+  status: 'Available' | 'In Use' | 'Out of Service';
+  notes: string;
+}
+
+export interface Person {
+  id: string;
+  name: string;
+  role: string; // e.g. "Assembler", "Test Tech", "Supervisor"
+  shift: string; // e.g. "Day", "Night", "Flex"
+  notes: string;
 }
 
 export interface Warehouse {
@@ -96,14 +119,43 @@ export interface SixPackInput {
   flaggedPass?: boolean;
 }
 
+export interface ProductionRun {
+  id: string;
+
+  // schedule / timeline
+  date: string; // YYYY-MM-DD
+  startTime: string; // HH:MM
+  durationMin: number;
+
+  process: string; // e.g. "SMT", "Final Assembly", "Test & Pack"
+  workOrder: string; // free text: WO-123
+  unitsPlanned: number;
+  unitsGood: number;
+  unitsScrap: number;
+
+  // who/what
+  assignedPeople: string; // comma-separated for simplicity
+  machinesUsed: string; // comma-separated MachineAsset names or IDs
+
+  status: 'Planned' | 'In Progress' | 'Complete' | 'Blocked' | 'Cancelled';
+
+  notes: string;
+  observations: string; // “what we saw”
+}
+
 export interface ScenarioData {
   name: ScenarioName;
-  decisions: PlanningDecision[]; // YOUR editable top 3 decisions + tracking
+
+  decisions: PlanningDecision[];
   inputs: GlobalInputs;
 
   inventory: InventoryItem[];
   logistics: LogisticsLane[];
   machines: MachineStation[];
+  machineAssets: MachineAsset[]; // NEW
+  people: Person[]; // NEW
+  production: ProductionRun[]; // NEW
+
   warehouses: Warehouse[];
   maintenance: MaintenanceAsset[];
   risks: RiskEntry[];
