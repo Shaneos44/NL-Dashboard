@@ -9,46 +9,62 @@ export interface PlanningDecision {
   notes: string;
 }
 
+export interface CapaItem {
+  id: string;
+  ref: string; // CAPA-001
+  batchId?: string;
+  title: string;
+  owner: string;
+  dueDate: string; // YYYY-MM-DD
+  status: 'Open' | 'In progress' | 'Effectiveness check' | 'Closed' | 'Cancelled';
+  rootCause: string;
+  action: string;
+  notes: string;
+}
+
 export interface GlobalInputs {
-  // Currency display: AUD
-  salePricePerUnit: number;
+  salePricePerUnit: number; // AUD
   monthlyDemand: number;
 
   availableMinutesPerMonth: number;
   oee: number;
   downtimePct: number;
 
-  labourRatePerHour: number;
+  labourRatePerHour: number; // AUD/hr
   labourMinutesPerUnit: number;
 
   qualityCostPerUnit: number;
 
-  scrapRatePct?: number; // 0.05 = 5%
-  overheadPct?: number; // 0.25 = 25%
-  holdingRatePctAnnual?: number; // 0.24 = 24%
-  safetyStockDays?: number; // e.g. 14
+  scrapRatePct?: number;
+  overheadPct?: number;
+  holdingRatePctAnnual?: number;
+  safetyStockDays?: number;
 
   capexTotal: number;
   depreciationMonths: number;
   marginGuardrailPct: number;
 }
 
-export interface InventoryItem {
+export interface StockItem {
   id: string;
   name: string;
-  category: 'RM' | 'Component' | 'Packaging';
+  type: 'Component' | 'Consumable' | 'Packaging' | 'Spare';
   unitCost: number;
-  usagePerProduct: number; // BOM usage per finished good
+  uom: string; // pcs, m, L
+  location: string;
+
+  // For finished unit BOM usage (used for post-assembly failures and good units)
+  usagePerFinishedUnit: number;
+
+  // Replenishment
   leadTimeDays: number;
   moq: number;
   singleSource: boolean;
 
-  // stock tracking
-  onHandQty: number; // physical stock on hand
-  reorderPointQty?: number; // optional manual reorder point
-  minQty?: number; // optional minimum on hand
-  uom?: string; // e.g. "pcs", "m", "L"
-  location?: string; // bin/location
+  // Physical stock
+  onHandQty: number;
+  reorderPointQty?: number;
+  minQty?: number;
 }
 
 export interface LogisticsLane {
@@ -60,29 +76,6 @@ export interface LogisticsLane {
   unitsPerShipment: number;
 }
 
-export interface MachineStation {
-  id: string;
-  station: string;
-  cycleTimeSec: number;
-  machinesInstalled: number;
-}
-
-export interface MachineAsset {
-  id: string;
-  name: string; // e.g. "SMT #1"
-  station: string; // link to station name
-  status: 'Available' | 'In Use' | 'Out of Service';
-  notes: string;
-}
-
-export interface Person {
-  id: string;
-  name: string;
-  role: string; // e.g. "Assembler", "Test Tech", "Supervisor"
-  shift: string; // e.g. "Day", "Night", "Flex"
-  notes: string;
-}
-
 export interface Warehouse {
   id: string;
   location: string;
@@ -92,12 +85,91 @@ export interface Warehouse {
   capacityPctLimit?: number;
 }
 
-export interface MaintenanceAsset {
+export interface Person {
   id: string;
-  machineType: string;
-  pmHoursPerMonth: number;
-  sparesCostPerMonth: number;
-  serviceCostPerMonth: number;
+  name: string;
+  role: string;
+  shift: string;
+  notes: string;
+}
+
+export interface MachineAsset {
+  id: string;
+  name: string;
+  type: string; // e.g. "Assembly Line", "Test Bench"
+  status: 'Available' | 'In Use' | 'Out of Service';
+  notes: string;
+}
+
+export interface ProcessTemplate {
+  id: string;
+  name: string; // e.g. "Final Assembly"
+  defaultDurationMin: number;
+  allowedMachineTypesCsv: string; // comma list of MachineAsset.type values
+  notes: string;
+}
+
+export type BatchStatus =
+  | 'Planned'
+  | 'In Progress'
+  | 'Issue'
+  | 'Complete'
+  | 'Quarantine'
+  | 'Rejected'
+  | 'Cancelled';
+
+export interface ProductionBatch {
+  id: string;
+  batchNumber: string;
+  purpose: string;
+
+  plannedQty: number;
+
+  // outcomes (editable)
+  goodQty: number;
+
+  // Scrap rules:
+  // - Assembly: component-level rejects (entered per component)
+  // - Post-Assembly: whole BOM rejected (finished unit fails after assembly)
+  scrapStage: 'Assembly' | 'Post-Assembly';
+
+  scrapQty: number;
+
+  // Component rejects used when scrapStage === 'Assembly'
+  // Format: one per line "Item Name, Qty"
+  componentRejects: string;
+
+  status: BatchStatus;
+
+  notes: string;
+  observations: string;
+}
+
+export interface ScheduledProcess {
+  id: string;
+  batchId: string;
+
+  // scheduled
+  date: string; // YYYY-MM-DD
+  durationDays: number; // assign each process to a day, and how many days it spans
+
+  processId: string; // ProcessTemplate.id
+  assignedPeopleIdsCsv: string; // comma-separated person IDs
+  assignedMachineIdsCsv: string; // comma-separated machine IDs
+
+  status: BatchStatus;
+  notes: string;
+  observations: string;
+}
+
+export interface MaintenanceBlock {
+  id: string;
+  date: string; // YYYY-MM-DD
+  durationDays: number;
+  machineIdsCsv: string;
+  title: string;
+  notes: string;
+  status: 'Planned' | 'In Progress' | 'Complete' | 'Cancelled';
 }
 
 export interface RiskEntry {
@@ -108,76 +180,30 @@ export interface RiskEntry {
   owner: string;
 }
 
-export interface SixPackInput {
-  id: string;
-  metric: string;
-  mean: number;
-  stdDev: number;
-  lsl: number;
-  usl: number;
-  mode: 'computed' | 'flags';
-  flaggedPass?: boolean;
-}
-
-/**
- * Production logic:
- * - unitsGood always consume BOM.
- * - unitsScrap depends on scrapScope:
- *    - 'Components': scrap is component-level and specified in componentScrapOverrides
- *    - 'Full BOM': each scrapped unit consumes full BOM
- */
-export interface ProductionRun {
-  id: string;
-
-  // schedule / timeline
-  date: string; // YYYY-MM-DD
-  startTime: string; // HH:MM
-  durationMin: number;
-
-  process: string; // e.g. "SMT", "Final Assembly", "Test & Pack"
-  workOrder: string; // WO-123 etc.
-  unitsPlanned: number;
-  unitsGood: number;
-  unitsScrap: number;
-
-  // NEW: controls how scrap affects consumption
-  scrapScope: 'Components' | 'Full BOM';
-
-  // NEW: component-level scrap used when scrapScope === 'Components'
-  // Format (one per line): "Item Name, QtyScrapped"
-  componentScrapOverrides: string;
-
-  // who/what
-  assignedPeople: string; // comma-separated for simplicity
-  machinesUsed: string; // comma-separated MachineAsset names or IDs
-
-  status: 'Planned' | 'In Progress' | 'Complete' | 'Blocked' | 'Cancelled';
-
-  notes: string;
-  observations: string;
-
-  // Optional absolute consumption overrides (wins last)
-  // Format: "Item Name, QtyConsumed"
-  consumptionOverrides: string;
-}
-
 export interface ScenarioData {
   name: ScenarioName;
 
+  // tracking
   decisions: PlanningDecision[];
+  capas: CapaItem[];
+
   inputs: GlobalInputs;
 
-  inventory: InventoryItem[];
-  logistics: LogisticsLane[];
-  machines: MachineStation[];
-  machineAssets: MachineAsset[];
+  // master data
+  stock: StockItem[];
   people: Person[];
-  production: ProductionRun[];
+  machines: MachineAsset[];
+  processes: ProcessTemplate[];
 
+  // execution
+  batches: ProductionBatch[];
+  schedule: ScheduledProcess[];
+  maintenanceBlocks: MaintenanceBlock[];
+
+  // planning
+  logistics: LogisticsLane[];
   warehouses: Warehouse[];
-  maintenance: MaintenanceAsset[];
   risks: RiskEntry[];
-  sixPack: SixPackInput[];
 
   auditLog: string[];
 }
