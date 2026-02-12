@@ -222,7 +222,6 @@ export function sixPackYieldPct(s: ScenarioData): number {
 
 /* -----------------------------
    PRODUCTION + STOCK HELPERS
-   (safe even if production fields missing)
 ------------------------------*/
 
 export function productionUnitsGoodCompleted(s: ScenarioData): number {
@@ -232,12 +231,13 @@ export function productionUnitsGoodCompleted(s: ScenarioData): number {
     .reduce((sum, r) => sum + (Number(r.unitsGood) || 0), 0);
 }
 
-export function inventoryConsumptionFromProduction(s: ScenarioData): Record<string, number> {
-  const runs: any[] = (s as any).production ?? [];
-  const consumedById: Record<string, number> = {};
-
-  // init
-  for (const item of s.inventory) consumedById[item.id] = 0;
+function parseLinesToItemQtyMap(
+  s: ScenarioData,
+  text: string
+): Record<string, number> {
+  const map: Record<string, number> = {};
+  const trimmed = String(text ?? '').trim();
+  if (!trimmed) return map;
 
   const findItemIdByName = (name: string) => {
     const n = name.trim().toLowerCase();
@@ -245,50 +245,79 @@ export function inventoryConsumptionFromProduction(s: ScenarioData): Record<stri
     return match?.id ?? null;
   };
 
-  const addDefaultBomConsumption = (unitsGood: number) => {
+  const lines = trimmed
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    const parts = line.split(',').map((p) => p.trim());
+    if (parts.length < 2) continue;
+
+    const itemName = parts[0];
+    const qty = Number(parts[1]);
+    if (!Number.isFinite(qty)) continue;
+
+    const id = findItemIdByName(itemName);
+    if (!id) continue;
+
+    map[id] = qty;
+  }
+
+  return map;
+}
+
+export function inventoryConsumptionFromProduction(s: ScenarioData): Record<string, number> {
+  const runs: any[] = (s as any).production ?? [];
+  const consumedById: Record<string, number> = {};
+
+  // init
+  for (const item of s.inventory) consumedById[item.id] = 0;
+
+  const bomForUnits = (units: number) => {
+    const add: Record<string, number> = {};
     for (const item of s.inventory) {
       const perUnit = Number(item.usagePerProduct) || 0;
-      consumedById[item.id] += unitsGood * perUnit;
+      add[item.id] = units * perUnit;
     }
+    return add;
   };
 
   for (const r of runs) {
     if (r?.status !== 'Complete') continue;
 
     const unitsGood = Number(r.unitsGood) || 0;
-    const overridesText = String(r.consumptionOverrides ?? '').trim();
+    const unitsScrap = Number(r.unitsScrap) || 0;
 
-    if (!overridesText) {
-      // no overrides → use BOM for all items
-      addDefaultBomConsumption(unitsGood);
-      continue;
+    const scrapScope: 'Components' | 'Full BOM' =
+      r.scrapScope === 'Full BOM' ? 'Full BOM' : 'Components';
+
+    // baseline: BOM × good
+    const perRunConsumed: Record<string, number> = bomForUnits(unitsGood);
+
+    // if post-assembly reject -> BOM × scrap as well
+    if (scrapScope === 'Full BOM' && unitsScrap > 0) {
+      const scrapBom = bomForUnits(unitsScrap);
+      for (const id of Object.keys(scrapBom)) {
+        perRunConsumed[id] = (perRunConsumed[id] ?? 0) + scrapBom[id];
+      }
     }
 
-    // Start from BOM as baseline
-    const perRunConsumed: Record<string, number> = {};
-    for (const item of s.inventory) perRunConsumed[item.id] = unitsGood * (Number(item.usagePerProduct) || 0);
-
-    // Apply overrides line-by-line
-    // Format: "Item Name, QtyConsumed"
-    const lines = overridesText.split('\n').map((x: string) => x.trim()).filter(Boolean);
-
-    for (const line of lines) {
-      const parts = line.split(',').map((p: string) => p.trim());
-      if (parts.length < 2) continue;
-
-      const itemName = parts[0];
-      const qty = Number(parts[1]);
-
-      if (!Number.isFinite(qty)) continue;
-
-      const id = findItemIdByName(itemName);
-      if (!id) continue;
-
-      // Override means: set absolute consumption for that item for this run
-      perRunConsumed[id] = qty;
+    // if assembly/component scrap -> add only what you specify (can be uneven)
+    if (scrapScope === 'Components') {
+      const componentAdds = parseLinesToItemQtyMap(s, r.componentScrapOverrides);
+      for (const id of Object.keys(componentAdds)) {
+        perRunConsumed[id] = (perRunConsumed[id] ?? 0) + componentAdds[id];
+      }
     }
 
-    // Add per-run consumed into totals
+    // absolute consumption overrides (wins last)
+    const absoluteOverrides = parseLinesToItemQtyMap(s, r.consumptionOverrides);
+    for (const id of Object.keys(absoluteOverrides)) {
+      perRunConsumed[id] = absoluteOverrides[id];
+    }
+
+    // add into totals
     for (const id of Object.keys(perRunConsumed)) {
       consumedById[id] += perRunConsumed[id];
     }
