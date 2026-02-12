@@ -185,3 +185,114 @@ hr{
   border-top: 1px solid rgba(255,255,255,.10);
   margin: 12px 0;
 }
+/* --- Calendar / Planner UI additions --- */
+.cal-wrap {
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  gap: 12px;
+}
+
+.cal-left .card {
+  margin-bottom: 12px;
+}
+
+.cal-main .card {
+  margin-bottom: 12px;
+}
+
+.cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.cal-col {
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  padding: 8px;
+  min-height: 180px;
+  background: rgba(255,255,255,0.03);
+}
+
+.cal-col-head {
+  font-weight: 700;
+  font-size: 12px;
+  opacity: 0.9;
+  margin-bottom: 6px;
+}
+
+.cal-item {
+  border-radius: 10px;
+  padding: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
+}
+
+.cal-empty {
+  opacity: 0.5;
+  padding: 10px 0;
+}
+
+.cal-maint {
+  background: rgba(255,255,255,0.08);
+  border-style: dashed;
+}
+
+.cal-planned { }
+.cal-inprogress { }
+.cal-issue { border-color: rgba(255, 165, 0, 0.45); }
+.cal-complete { border-color: rgba(0, 255, 140, 0.35); }
+.cal-quarantine { border-color: rgba(255, 220, 0, 0.45); }
+.cal-rejected { border-color: rgba(255, 70, 70, 0.45); }
+.cal-cancelled { opacity: 0.55; }
+
+.pill {
+  user-select: none;
+  padding: 10px;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+
+.tiny { font-size: 11px; opacity: 0.75; }
+.thin { padding: 10px; }
+
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.checkrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.pillrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pillcheck {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+}
