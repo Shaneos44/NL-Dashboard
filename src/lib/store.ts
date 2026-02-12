@@ -100,37 +100,45 @@ export function exportScenarioJson(s: ScenarioData): string {
   return JSON.stringify(s, null, 2);
 }
 
-export function inventoryCsv(s: ScenarioData): string {
+/**
+ * NEW: Stock CSV export (current schema)
+ */
+export function stockCsv(s: ScenarioData): string {
   const header =
-    'id,name,category,unitCost,usagePerProduct,leadTimeDays,moq,singleSource';
-  const rows = s.inventory.map((i) =>
+    'id,name,type,unitCost,uom,location,usagePerFinishedUnit,onHandQty,reorderPointQty,minQty,leadTimeDays,moq,singleSource';
+
+  const rows = (s.stock ?? []).map((i) =>
     [
       i.id,
       i.name,
-      i.category,
+      i.type,
       i.unitCost,
-      i.usagePerProduct,
+      i.uom,
+      i.location,
+      i.usagePerFinishedUnit,
+      i.onHandQty,
+      i.reorderPointQty ?? '',
+      i.minQty ?? '',
       i.leadTimeDays,
       i.moq,
       i.singleSource,
     ].join(',')
   );
+
   return [header, ...rows].join('\n');
 }
 
-export function sixPackCsv(s: ScenarioData): string {
-  const header = 'id,metric,mode,mean,stdDev,lsl,usl,flaggedPass';
-  const rows = s.sixPack.map((r) =>
-    [
-      r.id,
-      r.metric,
-      r.mode,
-      r.mean,
-      r.stdDev,
-      r.lsl,
-      r.usl,
-      r.flaggedPass ?? '',
-    ].join(',')
-  );
-  return [header, ...rows].join('\n');
+/**
+ * Backwards-compatible names (so older imports don’t break)
+ * Your app used to export inventory/sixPack CSVs.
+ * Six Pack is removed, so we keep a harmless stub.
+ */
+export function inventoryCsv(s: ScenarioData): string {
+  // inventory is now "stock"
+  return stockCsv(s);
+}
+
+export function sixPackCsv(_s: ScenarioData): string {
+  // Six Pack tab removed; return a valid CSV header to avoid runtime errors if still called.
+  return 'id,metric,mode,mean,stdDev,lsl,usl,flaggedPass\n';
 }
