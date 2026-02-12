@@ -1,0 +1,283 @@
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index 3b1c1e0..c9f05dd 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -119,6 +119,10 @@ export interface SixPackInput {
+ export interface ProductionRun {
+   id: string;
+ 
++  // scrap accounting:
++  // - Assembly: component-level rejects (not whole BOM)
++  // - Post-Assembly: whole BOM is scrapped (finished unit fails after assembly)
++  scrapStage?: 'Assembly' | 'Post-Assembly';
++
+   // schedule / timeline
+   date: string; // YYYY-MM-DD
+   startTime: string; // HH:MM
+   durationMin: number;
+@@ -141,9 +145,14 @@ export interface ProductionRun {
+   notes: string;
+   observations: string; // “what we saw”
+ 
+-   consumptionOverrides: string;
++  // Absolute per-run actuals (top priority). One per line: "Item Name, QtyConsumed"
++  consumptionOverrides: string;
++
++  // Only used when scrapStage === 'Assembly' to add component rejects.
++  // One per line: "Item Name, QtyRejected"
++  scrapComponentOverrides?: string;
+ }
+ 
+ export interface ScenarioData {
+diff --git a/src/lib/data.ts b/src/lib/data.ts
+index 3efad7d..a1b5f7c 100644
+--- a/src/lib/data.ts
++++ b/src/lib/data.ts
+@@ -126,6 +126,8 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
+   production: [
+     {
+       id: 'pr1',
++      scrapStage: 'Post-Assembly',
+       date: new Date().toISOString().slice(0, 10),
+       startTime: '08:00',
+       durationMin: 240,
+@@ -140,6 +142,7 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
+       notes: '',
+       observations: '',
+       consumptionOverrides: '',
++      scrapComponentOverrides: '',
+     },
+   ],
+ 
+diff --git a/src/App.tsx b/src/App.tsx
+index 7f2d5f1..0bdc6bb 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -90,7 +90,7 @@ export default function App() {
+        // - ensure new arrays exist
+        // - ensure inventory has onHandQty etc
+-       // - ensure production runs have consumptionOverrides
++       // - ensure production runs have consumptionOverrides + scrap fields
+        const patched = structuredClone(loaded) as any;
+ 
+        (['Pilot', 'Ramp', 'Scale'] as ScenarioName[]).forEach((sn) => {
+@@ -101,11 +101,16 @@ export default function App() {
+          sc.machineAssets = Array.isArray(sc.machineAssets) ? sc.machineAssets : [];
+          sc.production = Array.isArray(sc.production) ? sc.production : [];
+ 
+          sc.production = sc.production.map((r: any) => ({
+            ...r,
+            consumptionOverrides: typeof r?.consumptionOverrides === 'string' ? r.consumptionOverrides : '',
++           scrapStage: r?.scrapStage === 'Assembly' || r?.scrapStage === 'Post-Assembly' ? r.scrapStage : 'Post-Assembly',
++           scrapComponentOverrides:
++             typeof r?.scrapComponentOverrides === 'string' ? r.scrapComponentOverrides : '',
+          }));
+ 
+          sc.inventory = Array.isArray(sc.inventory)
+            ? sc.inventory.map((it: any) => ({
+@@ -309,13 +314,25 @@ export default function App() {
+            <div className="card">
+              <h3>Production Schedule & Run Log</h3>
+              <div className="hint">
+                Create runs, assign people + machines, mark status and record notes/observations.
+                <br />
+-               Stock Take uses: (1) Actual Consumption Overrides for that run if provided, otherwise (2) BOM × unitsGood.
++               Stock Take uses (in order):<br />
++               (1) <b>Actual consumption overrides</b> (absolute per item), otherwise<br />
++               (2) <b>BOM × unitsGood</b> plus scrap rules below.
+                <br />
+-               Overrides format (one per line): <code>Item Name, QtyConsumed</code> e.g. <code>Core PCB, 210</code>
++               <b>Scrap rules:</b> if scrap is <b>Post-Assembly</b> then <b>whole BOM × unitsScrap</b> is consumed.
++               If scrap is <b>Assembly</b>, enter component rejects below (or it will fall back to whole BOM × unitsScrap).
++               <br />
++               Overrides format (one per line): <code>Item Name, Qty</code> e.g. <code>Core PCB, 210</code>
+              </div>
+            </div>
+ 
+            <EditableTable
+              title="Runs"
+              rows={scenario.production}
+              columns={[
+                { key: 'date', label: 'Date' },
+                { key: 'startTime', label: 'Start (HH:MM)' },
+                { key: 'durationMin', label: 'Duration (min)', type: 'number' },
+                { key: 'process', label: 'Process' },
+                { key: 'workOrder', label: 'Work Order' },
+                { key: 'unitsPlanned', label: 'Planned', type: 'number' },
+                { key: 'unitsGood', label: 'Good', type: 'number' },
+                { key: 'unitsScrap', label: 'Scrap', type: 'number' },
++               {
++                 key: 'scrapStage',
++                 label: 'Scrap stage',
++                 type: 'select',
++                 options: [
++                   { label: 'Assembly (component rejects)', value: 'Assembly' },
++                   { label: 'Post-Assembly (whole BOM scrapped)', value: 'Post-Assembly' },
++                 ],
++               },
+                { key: 'assignedPeople', label: 'People (comma list)', type: 'textarea' },
+                { key: 'machinesUsed', label: 'Machines (comma list)', type: 'textarea' },
+                {
+                  key: 'status',
+                  label: 'Status',
+                  type: 'select',
+                  options: [
+                    { label: 'Planned', value: 'Planned' },
+                    { label: 'In Progress', value: 'In Progress' },
+                    { label: 'Complete', value: 'Complete' },
+                    { label: 'Blocked', value: 'Blocked' },
+                    { label: 'Cancelled', value: 'Cancelled' },
+                  ],
+                },
+                { key: 'notes', label: 'Notes', type: 'textarea' },
+                { key: 'observations', label: 'Observations', type: 'textarea' },
+                { key: 'consumptionOverrides', label: 'Actual consumption overrides (Item,Qty)', type: 'textarea' },
++               { key: 'scrapComponentOverrides', label: 'Assembly scrap component rejects (Item,Qty)', type: 'textarea' },
+              ]}
+              onChange={(rows) =>
+                updateScenario({ ...scenario, production: rows }, `Updated production runs (${nowIso()})`)
+              }
+              createRow={() => ({
+                id: crypto.randomUUID(),
++               scrapStage: 'Post-Assembly' as const,
+                date: todayYmd(),
+                startTime: '08:00',
+                durationMin: 120,
+                process: 'Final Assembly',
+                workOrder: '',
+                unitsPlanned: 0,
+                unitsGood: 0,
+                unitsScrap: 0,
+                assignedPeople: '',
+                machinesUsed: '',
+                status: 'Planned' as const,
+                notes: '',
+                observations: '',
+                consumptionOverrides: '',
++               scrapComponentOverrides: '',
+              })}
+            />
+diff --git a/src/lib/calc.ts b/src/lib/calc.ts
+index 8ef2c7a..cbb4f56 100644
+--- a/src/lib/calc.ts
++++ b/src/lib/calc.ts
+@@ -235,6 +235,45 @@ export function inventoryConsumptionFromProduction(s: ScenarioData): Record<string, number> {
+   const runs: any[] = (s as any).production ?? [];
+   const consumedById: Record<string, number> = {};
+ 
+   // init
+   for (const item of s.inventory) consumedById[item.id] = 0;
+ 
++  const addBom = (target: Record<string, number>, units: number) => {
++    if (!units) return;
++    for (const item of s.inventory) {
++      const perUnit = Number(item.usagePerProduct) || 0;
++      target[item.id] = (target[item.id] ?? 0) + units * perUnit;
++    }
++  };
++
+   const findItemIdByName = (name: string) => {
+     const n = name.trim().toLowerCase();
+     const match = s.inventory.find((i) => i.name.trim().toLowerCase() === n);
+     return match?.id ?? null;
+   };
+ 
+-  const addDefaultBomConsumption = (unitsGood: number) => {
+-    for (const item of s.inventory) {
+-      const perUnit = Number(item.usagePerProduct) || 0;
+-      consumedById[item.id] += unitsGood * perUnit;
+-    }
+-  };
+-
+   for (const r of runs) {
+     if (r?.status !== 'Complete') continue;
+ 
+     const unitsGood = Number(r.unitsGood) || 0;
++    const unitsScrap = Number(r.unitsScrap) || 0;
++    const scrapStage: 'Assembly' | 'Post-Assembly' =
++      r?.scrapStage === 'Assembly' || r?.scrapStage === 'Post-Assembly' ? r.scrapStage : 'Post-Assembly';
++
+     const overridesText = String(r.consumptionOverrides ?? '').trim();
+ 
+-    if (!overridesText) {
+-      // no overrides → use BOM for all items
+-      addDefaultBomConsumption(unitsGood);
+-      continue;
+-    }
+-
+-    // Start from BOM as baseline
++    // Start from BOM baseline for GOOD units
+     const perRunConsumed: Record<string, number> = {};
+-    for (const item of s.inventory) perRunConsumed[item.id] = unitsGood * (Number(item.usagePerProduct) || 0);
++    for (const item of s.inventory) perRunConsumed[item.id] = 0;
++    addBom(perRunConsumed, unitsGood);
++
++    // Scrap handling:
++    // - Post-Assembly: whole BOM scrapped
++    // - Assembly: component rejects (if provided); otherwise fall back to whole BOM to avoid undercounting
++    if (unitsScrap > 0) {
++      if (scrapStage === 'Post-Assembly') {
++        addBom(perRunConsumed, unitsScrap);
++      } else {
++        const compText = String(r.scrapComponentOverrides ?? '').trim();
++        if (!compText) {
++          // fallback: assume whole BOM consumed for scrapped units unless component rejects are specified
++          addBom(perRunConsumed, unitsScrap);
++        } else {
++          const lines = compText.split('\n').map((x: string) => x.trim()).filter(Boolean);
++          for (const line of lines) {
++            const parts = line.split(',').map((p: string) => p.trim());
++            if (parts.length < 2) continue;
++            const itemName = parts[0];
++            const qty = Number(parts[1]);
++            if (!Number.isFinite(qty)) continue;
++            const id = findItemIdByName(itemName);
++            if (!id) continue;
++            perRunConsumed[id] = (perRunConsumed[id] ?? 0) + qty; // additive rejects
++          }
++        }
++      }
++    }
+ 
+-    // Apply overrides line-by-line
+-    // Format: "Item Name, QtyConsumed"
+-    const lines = overridesText.split('\n').map((x: string) => x.trim()).filter(Boolean);
+-
+-    for (const line of lines) {
+-      const parts = line.split(',').map((p: string) => p.trim());
+-      if (parts.length < 2) continue;
+-
+-      const itemName = parts[0];
+-      const qty = Number(parts[1]);
+-
+-      if (!Number.isFinite(qty)) continue;
+-
+-      const id = findItemIdByName(itemName);
+-      if (!id) continue;
+-
+-      // Override means: set absolute consumption for that item for this run
+-      perRunConsumed[id] = qty;
++    // Apply absolute "Actual consumption overrides" last (highest priority)
++    if (overridesText) {
++      const lines = overridesText.split('\n').map((x: string) => x.trim()).filter(Boolean);
++      for (const line of lines) {
++        const parts = line.split(',').map((p: string) => p.trim());
++        if (parts.length < 2) continue;
++        const itemName = parts[0];
++        const qty = Number(parts[1]);
++        if (!Number.isFinite(qty)) continue;
++        const id = findItemIdByName(itemName);
++        if (!id) continue;
++        // set absolute consumption for that item for this run
++        perRunConsumed[id] = qty;
++      }
+     }
+ 
+     // Add per-run consumed into totals
+     for (const id of Object.keys(perRunConsumed)) {
+       consumedById[id] += perRunConsumed[id];
+     }
+   }
+ 
+   return consumedById;
+ }
