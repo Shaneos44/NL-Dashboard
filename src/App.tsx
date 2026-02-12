@@ -88,9 +88,9 @@ export default function App() {
       const loaded = await loadState();
 
       // Lightweight migration for older states:
-      // - ensure new arrays exist
+      // - ensure arrays exist
       // - ensure inventory has onHandQty etc
-      // - ensure production runs have consumptionOverrides
+      // - ensure production runs have new scrap fields
       const patched = structuredClone(loaded) as any;
 
       (['Pilot', 'Ramp', 'Scale'] as ScenarioName[]).forEach((sn) => {
@@ -104,6 +104,8 @@ export default function App() {
         sc.production = sc.production.map((r: any) => ({
           ...r,
           consumptionOverrides: typeof r?.consumptionOverrides === 'string' ? r.consumptionOverrides : '',
+          scrapScope: r?.scrapScope === 'Full BOM' ? 'Full BOM' : 'Components',
+          componentScrapOverrides: typeof r?.componentScrapOverrides === 'string' ? r.componentScrapOverrides : '',
         }));
 
         sc.inventory = Array.isArray(sc.inventory)
@@ -153,7 +155,6 @@ export default function App() {
   const bottleneck = useMemo(() => bottleneckStation(scenario), [scenario]);
   const fte = useMemo(() => fteRequired(scenario), [scenario]);
 
-  const invExposure = useMemo(() => computeInventoryExposure(scenario), [scenario]);
   const invTotals = useMemo(() => inventoryExposureTotals(scenario), [scenario]);
 
   const laneSummary = useMemo(() => logisticsSummary(scenario), [scenario]);
@@ -163,9 +164,7 @@ export default function App() {
   const belowMinCount = stockView.filter((x) => x.status === 'Below Min').length;
   const reorderCount = stockView.filter((x) => x.status === 'Reorder').length;
 
-  const hasCapacityShortfall = capacityRows.some(
-    (r: { shortfallMachines: number }) => r.shortfallMachines > 0.0001
-  );
+  const hasCapacityShortfall = capacityRows.some((r: { shortfallMachines: number }) => r.shortfallMachines > 0.0001);
   const singleSourceCount = scenario.inventory.filter((i) => i.singleSource).length;
 
   const scenarios: ScenarioName[] = ['Pilot', 'Ramp', 'Scale'];
@@ -208,9 +207,7 @@ export default function App() {
       <div className="header">
         <select
           value={state.selectedScenario}
-          onChange={(e) =>
-            setState((s: AppState) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))
-          }
+          onChange={(e) => setState((s: AppState) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))}
         >
           {scenarios.map((n) => (
             <option key={n} value={n}>
@@ -222,11 +219,7 @@ export default function App() {
         <button
           onClick={() => {
             const target: ScenarioName =
-              state.selectedScenario === 'Pilot'
-                ? 'Ramp'
-                : state.selectedScenario === 'Ramp'
-                ? 'Scale'
-                : 'Pilot';
+              state.selectedScenario === 'Pilot' ? 'Ramp' : state.selectedScenario === 'Ramp' ? 'Scale' : 'Pilot';
             setState(duplicateScenario(state, state.selectedScenario, target));
           }}
         >
@@ -239,10 +232,7 @@ export default function App() {
       </div>
 
       <div className="kpis">
-        <KpiCard
-          label="Revenue / mo"
-          value={aud0.format(scenario.inputs.salePricePerUnit * scenario.inputs.monthlyDemand)}
-        />
+        <KpiCard label="Revenue / mo" value={aud0.format(scenario.inputs.salePricePerUnit * scenario.inputs.monthlyDemand)} />
         <KpiCard
           label="Margin %"
           value={`${cost.marginPct.toFixed(1)}%`}
@@ -255,11 +245,7 @@ export default function App() {
           value={`${belowMinCount} below min / ${reorderCount} reorder`}
           tone={belowMinCount > 0 ? 'bad' : reorderCount > 0 ? 'warn' : 'good'}
         />
-        <KpiCard
-          label="Single-source items"
-          value={String(singleSourceCount)}
-          tone={singleSourceCount > 0 ? 'warn' : 'good'}
-        />
+        <KpiCard label="Single-source items" value={String(singleSourceCount)} tone={singleSourceCount > 0 ? 'warn' : 'good'} />
       </div>
 
       <div className="tab-row">
@@ -309,11 +295,17 @@ export default function App() {
           <div className="card">
             <h3>Production Schedule & Run Log</h3>
             <div className="hint">
-              Create runs, assign people + machines, mark status and record notes/observations.
+              Stock Take consumption rules:
               <br />
-              Stock Take uses: (1) Actual Consumption Overrides for that run if provided, otherwise (2) BOM × unitsGood.
+              <b>Always</b> consumes <code>BOM × unitsGood</code>.
               <br />
-              Overrides format (one per line): <code>Item Name, QtyConsumed</code> e.g. <code>Core PCB, 210</code>
+              If <b>Scrap scope = Full BOM</b> (post-assembly rejects): also consumes <code>BOM × unitsScrap</code>.
+              <br />
+              If <b>Scrap scope = Components</b> (assembly scrap): add component scrap lines below (can be uneven per item).
+              <br />
+              Optional: “Actual consumption overrides” sets absolute consumed qty per item for the run (wins last).
+              <br />
+              Line format: <code>Item Name, Qty</code>
             </div>
           </div>
 
@@ -329,6 +321,16 @@ export default function App() {
               { key: 'unitsPlanned', label: 'Planned', type: 'number' },
               { key: 'unitsGood', label: 'Good', type: 'number' },
               { key: 'unitsScrap', label: 'Scrap', type: 'number' },
+              {
+                key: 'scrapScope',
+                label: 'Scrap scope',
+                type: 'select',
+                options: [
+                  { label: 'Components (assembly)', value: 'Components' },
+                  { label: 'Full BOM (post-assembly)', value: 'Full BOM' },
+                ],
+              },
+              { key: 'componentScrapOverrides', label: 'Component scrap (Item,Qty)', type: 'textarea' },
               { key: 'assignedPeople', label: 'People (comma list)', type: 'textarea' },
               { key: 'machinesUsed', label: 'Machines (comma list)', type: 'textarea' },
               {
@@ -347,9 +349,7 @@ export default function App() {
               { key: 'observations', label: 'Observations', type: 'textarea' },
               { key: 'consumptionOverrides', label: 'Actual consumption overrides (Item,Qty)', type: 'textarea' },
             ]}
-            onChange={(rows) =>
-              updateScenario({ ...scenario, production: rows }, `Updated production runs (${nowIso()})`)
-            }
+            onChange={(rows) => updateScenario({ ...scenario, production: rows }, `Updated production runs (${nowIso()})`)}
             createRow={() => ({
               id: crypto.randomUUID(),
               date: todayYmd(),
@@ -360,6 +360,8 @@ export default function App() {
               unitsPlanned: 0,
               unitsGood: 0,
               unitsScrap: 0,
+              scrapScope: 'Components' as const,
+              componentScrapOverrides: '',
               assignedPeople: '',
               machinesUsed: '',
               status: 'Planned' as const,
@@ -371,9 +373,7 @@ export default function App() {
 
           <div className="card">
             <h3>Machine Usage Quick View</h3>
-            <div className="hint">
-              Update machine status in Resources tab. Use machine names in the run’s “Machines” field.
-            </div>
+            <div className="hint">Update machine status in Resources tab. Use machine names in the run’s “Machines” field.</div>
             <div className="table-wrap">
               <table>
                 <thead>
@@ -413,8 +413,7 @@ export default function App() {
           <div className="card">
             <h3>Stock Take</h3>
             <div className="small">
-              Completed runs consume stock. If a run has overrides, those values are used for matching items; all others
-              fall back to BOM × unitsGood.
+              Completed runs consume stock using the Production rules (good + scrap + optional overrides).
             </div>
           </div>
 
@@ -495,9 +494,7 @@ export default function App() {
               },
               { key: 'notes', label: 'Notes', type: 'textarea' },
             ]}
-            onChange={(rows) =>
-              updateScenario({ ...scenario, machineAssets: rows }, `Updated machine assets (${nowIso()})`)
-            }
+            onChange={(rows) => updateScenario({ ...scenario, machineAssets: rows }, `Updated machine assets (${nowIso()})`)}
             createRow={() => ({
               id: crypto.randomUUID(),
               name: 'New machine',
