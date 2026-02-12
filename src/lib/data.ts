@@ -137,6 +137,10 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
       unitsPlanned: 200,
       unitsGood: 0,
       unitsScrap: 0,
+
+      scrapScope: 'Components',
+      componentScrapOverrides: '',
+
       assignedPeople: 'Operator A, Supervisor',
       machinesUsed: 'Assembly Line #1',
       status: 'Planned',
