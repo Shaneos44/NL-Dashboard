@@ -43,7 +43,7 @@ export interface InventoryItem {
   moq: number;
   singleSource: boolean;
 
-  // NEW: stock tracking
+  // stock tracking
   onHandQty: number; // physical stock on hand
   reorderPointQty?: number; // optional manual reorder point
   minQty?: number; // optional minimum on hand
@@ -119,6 +119,13 @@ export interface SixPackInput {
   flaggedPass?: boolean;
 }
 
+/**
+ * Production logic:
+ * - unitsGood always consume BOM.
+ * - unitsScrap depends on scrapScope:
+ *    - 'Components': scrap is component-level and specified in componentScrapOverrides
+ *    - 'Full BOM': each scrapped unit consumes full BOM
+ */
 export interface ProductionRun {
   id: string;
 
@@ -128,10 +135,17 @@ export interface ProductionRun {
   durationMin: number;
 
   process: string; // e.g. "SMT", "Final Assembly", "Test & Pack"
-  workOrder: string; // free text: WO-123
+  workOrder: string; // WO-123 etc.
   unitsPlanned: number;
   unitsGood: number;
   unitsScrap: number;
+
+  // NEW: controls how scrap affects consumption
+  scrapScope: 'Components' | 'Full BOM';
+
+  // NEW: component-level scrap used when scrapScope === 'Components'
+  // Format (one per line): "Item Name, QtyScrapped"
+  componentScrapOverrides: string;
 
   // who/what
   assignedPeople: string; // comma-separated for simplicity
@@ -140,9 +154,11 @@ export interface ProductionRun {
   status: 'Planned' | 'In Progress' | 'Complete' | 'Blocked' | 'Cancelled';
 
   notes: string;
-  observations: string; // “what we saw”
+  observations: string;
 
-   consumptionOverrides: string;
+  // Optional absolute consumption overrides (wins last)
+  // Format: "Item Name, QtyConsumed"
+  consumptionOverrides: string;
 }
 
 export interface ScenarioData {
@@ -154,9 +170,9 @@ export interface ScenarioData {
   inventory: InventoryItem[];
   logistics: LogisticsLane[];
   machines: MachineStation[];
-  machineAssets: MachineAsset[]; // NEW
-  people: Person[]; // NEW
-  production: ProductionRun[]; // NEW
+  machineAssets: MachineAsset[];
+  people: Person[];
+  production: ProductionRun[];
 
   warehouses: Warehouse[];
   maintenance: MaintenanceAsset[];
