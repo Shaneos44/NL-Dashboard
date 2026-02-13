@@ -9,7 +9,7 @@ import { MaintenancePlanner } from './components/MaintenancePlanner';
 import type { ScenarioName } from './lib/types';
 import type { AppState } from './lib/store';
 
-import { computeCostBreakdown, stockRemainingAfterProduction, summaryAlerts } from './lib/calc';
+import { computeCostBreakdown, stockRemainingAfterProduction, summaryAlerts, scheduleRiskSummary } from './lib/calc';
 import { defaultState, loadState, saveState, duplicateScenario, exportScenarioJson } from './lib/store';
 
 const tabs = ['Summary', 'Production', 'Stock', 'Resources', 'Decisions & Tracking', 'Inputs', 'Logistics', 'Warehouses', 'Maintenance', 'Risk'] as const;
@@ -96,6 +96,7 @@ export default function App() {
   const cost = useMemo(() => computeCostBreakdown(scenario as any), [scenario]);
   const stockView = useMemo(() => stockRemainingAfterProduction(scenario as any), [scenario]);
   const alerts = useMemo(() => summaryAlerts(scenario as any), [scenario]);
+  const sched = useMemo(() => scheduleRiskSummary(scenario as any), [scenario]);
 
   const updateScenario = (next: typeof scenario, note?: string) => {
     const audit = note ? [...next.auditLog, note] : next.auditLog;
@@ -156,10 +157,10 @@ export default function App() {
           value={`${cost.marginPct.toFixed(1)}%`}
           tone={cost.marginPct > (scenario as any).inputs.marginGuardrailPct ? 'good' : 'bad'}
         />
-        <KpiCard label="Stock" value={`${alerts.belowMin} below min / ${alerts.reorder} reorder`} tone={alerts.belowMin > 0 ? 'bad' : alerts.reorder > 0 ? 'warn' : 'good'} />
-        <KpiCard label="Open issues" value={String(alerts.openIssues)} tone={alerts.openIssues > 0 ? 'warn' : 'good'} />
-        <KpiCard label="Open CAPAs" value={String(alerts.openCapas)} tone={alerts.openCapas > 0 ? 'warn' : 'good'} />
-        <KpiCard label="Machines down" value={String(alerts.machinesDown)} tone={alerts.machinesDown > 0 ? 'bad' : 'good'} />
+        <KpiCard label="Ready (7d)" value={String(sched.ready)} tone={sched.ready > 0 ? 'good' : 'neutral'} />
+        <KpiCard label="At risk (7d)" value={String(sched.atRisk)} tone={sched.atRisk > 0 ? 'warn' : 'good'} />
+        <KpiCard label="Blocked (7d)" value={String(sched.blocked)} tone={sched.blocked > 0 ? 'bad' : 'good'} />
+        <KpiCard label="Stock alerts" value={`${alerts.belowMin} below min / ${alerts.reorder} reorder`} tone={alerts.belowMin > 0 ? 'bad' : alerts.reorder > 0 ? 'warn' : 'good'} />
       </div>
 
       <div className="tab-row">
@@ -170,7 +171,6 @@ export default function App() {
         ))}
       </div>
 
-      {/* SUMMARY */}
       {activeTab === 'Summary' && (
         <div className="layout-grid">
           <div className="card">
@@ -179,24 +179,28 @@ export default function App() {
               • Demand: <b>{(scenario as any).inputs.monthlyDemand.toLocaleString()}</b> units/mo
               <br />• Total cost/unit: <b>{aud.format(cost.total)}</b>
               <br />• Margin/unit: <b>{aud.format(cost.marginPerUnit)}</b> · Margin: <b>{cost.marginPct.toFixed(1)}%</b>
+              <br />• Schedule (next 7 days): <b>{sched.ready}</b> ready, <b>{sched.atRisk}</b> at risk, <b>{sched.blocked}</b> blocked
               <br />• Stock: <b>{alerts.belowMin}</b> below min, <b>{alerts.reorder}</b> reorder
               <br />• Open issues: <b>{alerts.openIssues}</b> · Open CAPAs: <b>{alerts.openCapas}</b> · Machines down: <b>{alerts.machinesDown}</b>
             </div>
 
             <div className="hint" style={{ marginTop: 12 }}>
-              This dashboard links Resources → Production → Stock automatically. Mark scheduled processes <b>Complete</b> to apply stock usage (good + scrap rules).
+              Most value comes from: Resources → Production → Stock.
+              <br />
+              Drag a batch onto the calendar to auto-create the process chain, then assign people/machines and update statuses.
             </div>
           </div>
 
           <div className="card">
             <h3>What needs attention</h3>
             <ul className="small">
+              {sched.atRisk > 0 && <li><b>Schedule at risk</b> — conflicts detected (double-booking or maintenance clash). Fix in Production.</li>}
+              {sched.blocked > 0 && <li><b>Blocked work</b> — items in Issue/Quarantine/Cancelled. Review and add CAPAs if needed.</li>}
               {alerts.belowMin > 0 && <li><b>Stock below minimum</b> — check Stock tab and raise orders.</li>}
-              {alerts.reorder > 0 && <li><b>Stock at reorder</b> — review reorder points and supplier lead times.</li>}
-              {alerts.openIssues > 0 && <li><b>Production issues/quarantine</b> — review Production schedule items marked Issue/Quarantine.</li>}
+              {alerts.reorder > 0 && <li><b>Stock at reorder</b> — review reorder points and lead times.</li>}
               {alerts.openCapas > 0 && <li><b>Open CAPAs</b> — assign owners and due dates in Decisions & Tracking.</li>}
-              {alerts.machinesDown > 0 && <li><b>Machines out of service</b> — update status in Resources and plan Maintenance blocks.</li>}
-              {alerts.belowMin === 0 && alerts.reorder === 0 && alerts.openIssues === 0 && alerts.openCapas === 0 && alerts.machinesDown === 0 && (
+              {alerts.machinesDown > 0 && <li><b>Machines out of service</b> — update Resources and schedule Maintenance blocks.</li>}
+              {sched.atRisk === 0 && sched.blocked === 0 && alerts.belowMin === 0 && alerts.reorder === 0 && alerts.openCapas === 0 && alerts.machinesDown === 0 && (
                 <li>Nothing critical flagged right now.</li>
               )}
             </ul>
@@ -206,15 +210,38 @@ export default function App() {
               Export JSON snapshot
             </button>
           </div>
+
+          <div className="card">
+            <h3>Stock quick view</h3>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Remaining</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stockView.slice(0, 8).map((r) => (
+                    <tr key={r.id}>
+                      <td>{r.name}</td>
+                      <td>{Math.round(r.remainingQty).toLocaleString()}</td>
+                      <td>{r.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="tiny" style={{ marginTop: 8 }}>
+              (Shows first 8 items; full list in Stock tab.)
+            </div>
+          </div>
         </div>
       )}
 
-      {/* PRODUCTION */}
-      {activeTab === 'Production' && (
-        <ProductionCalendar scenario={scenario as any} onChange={updateScenario as any} />
-      )}
+      {activeTab === 'Production' && <ProductionCalendar scenario={scenario as any} onChange={updateScenario as any} />}
 
-      {/* STOCK */}
       {activeTab === 'Stock' && (
         <div>
           <div className="card">
@@ -304,7 +331,6 @@ export default function App() {
         </div>
       )}
 
-      {/* RESOURCES */}
       {activeTab === 'Resources' && (
         <div>
           <EditableTable
@@ -375,7 +401,6 @@ export default function App() {
         </div>
       )}
 
-      {/* DECISIONS & TRACKING */}
       {activeTab === 'Decisions & Tracking' && (
         <div>
           <EditableTable
@@ -417,7 +442,7 @@ export default function App() {
               { key: 'batchId', label: 'Batch ID (optional)' },
               { key: 'title', label: 'Title' },
               { key: 'owner', label: 'Owner' },
-              { key: 'dueDate', label: 'Due date', type: 'date' as any },
+              { key: 'dueDate', label: 'Due date' },
               {
                 key: 'status',
                 label: 'Status',
@@ -451,7 +476,6 @@ export default function App() {
         </div>
       )}
 
-      {/* INPUTS */}
       {activeTab === 'Inputs' && (
         <div className="card">
           <h3>Global drivers (AUD)</h3>
@@ -479,7 +503,6 @@ export default function App() {
         </div>
       )}
 
-      {/* LOGISTICS */}
       {activeTab === 'Logistics' && (
         <EditableTable
           title="Transport lanes"
@@ -520,7 +543,6 @@ export default function App() {
         />
       )}
 
-      {/* WAREHOUSES */}
       {activeTab === 'Warehouses' && (
         <EditableTable
           title="Warehouses"
@@ -552,12 +574,8 @@ export default function App() {
         />
       )}
 
-      {/* MAINTENANCE */}
-      {activeTab === 'Maintenance' && (
-        <MaintenancePlanner scenario={scenario as any} onChange={updateScenario as any} />
-      )}
+      {activeTab === 'Maintenance' && <MaintenancePlanner scenario={scenario as any} onChange={updateScenario as any} />}
 
-      {/* RISK */}
       {activeTab === 'Risk' && (
         <EditableTable
           title="Risk register"
