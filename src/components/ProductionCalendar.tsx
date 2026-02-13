@@ -282,7 +282,18 @@ export function ProductionCalendar(props: {
               <tbody>
                 {scenario.batches.map((b) => (
                   <tr key={b.id}>
-                    <td>{b.batchNumber}</td>
+                    <td>
+  <input
+    value={b.batchNumber}
+    onChange={(e) => {
+      const next = scenario.batches.map((x) =>
+        x.id === b.id ? { ...x, batchNumber: e.target.value } : x
+      );
+      onChange({ ...scenario, batches: next }, `Renamed batch ${b.batchNumber} → ${e.target.value}`);
+    }}
+  />
+</td>
+
                     <td>
                       <input
                         type="number"
