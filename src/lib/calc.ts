@@ -42,9 +42,7 @@ export function computeCostBreakdown(s: ScenarioData): CostBreakdown {
   const warehouse = safeDivide(warehouseMonthly, v);
 
   const holding = material * holdingRateMonthly(s);
-
   const capexDepreciation = safeDivide(safeDivide(s.inputs.capexTotal, s.inputs.depreciationMonths), v);
-
   const quality = s.inputs.qualityCostPerUnit;
 
   const total = labour + labourOverhead + material + logistics + warehouse + holding + capexDepreciation + quality;
@@ -65,6 +63,18 @@ export function computeCostBreakdown(s: ScenarioData): CostBreakdown {
     marginPerUnit,
     marginPct,
   };
+}
+
+function ymd(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+function addDays(date: Date, days: number) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+function parseCsv(s: string) {
+  return s.split(',').map((x) => x.trim()).filter(Boolean);
 }
 
 function findStockIdByName(s: ScenarioData, name: string): string | null {
@@ -98,33 +108,26 @@ function addBomConsumption(s: ScenarioData, target: Record<string, number>, unit
   }
 }
 
-// Production consumption is driven by BATCH outcomes (good + scrap rules),
-// but only counted when there is at least one scheduled item for that batch marked Complete.
+// Stock consumption is driven by BATCH outcomes, but only counted when
+// there is at least one scheduled item for that batch marked Complete.
 export function stockConsumptionFromCompletedBatches(s: ScenarioData): Record<string, number> {
   const consumed: Record<string, number> = {};
   for (const it of s.stock) consumed[it.id] = 0;
 
-  const completedBatchIds = new Set(
-    s.schedule.filter((x) => x.status === 'Complete').map((x) => x.batchId)
-  );
+  const completedBatchIds = new Set(s.schedule.filter((x) => x.status === 'Complete').map((x) => x.batchId));
 
   for (const b of s.batches) {
     if (!completedBatchIds.has(b.id)) continue;
 
-    // Good units always consume BOM
     addBomConsumption(s, consumed, Number(b.goodQty) || 0);
 
     const scrapQty = Number(b.scrapQty) || 0;
     if (!scrapQty) continue;
 
     if (b.scrapStage === 'Post-Assembly') {
-      // Whole BOM scrapped
       addBomConsumption(s, consumed, scrapQty);
     } else {
-      // Assembly scrap = component rejects, uneven per component
       const compRejects = parseItemQtyLinesToIdQty(s, b.componentRejects);
-
-      // If nothing entered, fall back to BOM to avoid undercounting
       if (Object.keys(compRejects).length === 0) {
         addBomConsumption(s, consumed, scrapQty);
       } else {
@@ -191,4 +194,85 @@ export function summaryAlerts(s: ScenarioData): {
   const machinesDown = s.machines.filter((m) => m.status === 'Out of Service').length;
 
   return { belowMin, reorder, openIssues, openCapas, machinesDown };
+}
+
+/**
+ * Executive scheduling indicator:
+ * - Ready: scheduled items in next 7 days that are Planned/In Progress with no conflicts
+ * - At risk: scheduled items in next 7 days with conflicts (double-booking or maintenance clash)
+ * - Blocked: schedule items in next 7 days in Issue/Quarantine/Cancelled
+ */
+export function scheduleRiskSummary(s: ScenarioData): { ready: number; atRisk: number; blocked: number } {
+  const start = new Date();
+  const days = Array.from({ length: 7 }, (_, i) => ymd(addDays(start, i)));
+  const inWindow = (date: string) => days.includes(date);
+
+  // Booking counts per day
+  const byDay: Record<string, { people: Record<string, number>; machines: Record<string, number> }> = {};
+  for (const d of days) byDay[d] = { people: {}, machines: {} };
+
+  const addBooking = (day: string, peopleCsv: string, machinesCsv: string) => {
+    if (!byDay[day]) return;
+    for (const pid of parseCsv(peopleCsv)) byDay[day].people[pid] = (byDay[day].people[pid] ?? 0) + 1;
+    for (const mid of parseCsv(machinesCsv)) byDay[day].machines[mid] = (byDay[day].machines[mid] ?? 0) + 1;
+  };
+
+  // Maintenance blocks count as machine bookings (conflict trigger)
+  const maintenanceBooking = (machineId: string, day: string) => {
+    return s.maintenanceBlocks.some((mb) => {
+      if (mb.status === 'Cancelled') return false;
+      const ids = parseCsv(mb.machineIdsCsv);
+      if (!ids.includes(machineId)) return false;
+
+      const startY = mb.date;
+      const dur = Number(mb.durationDays) || 1;
+      const startD = new Date(startY + 'T00:00:00');
+      for (let i = 0; i < dur; i++) {
+        if (ymd(addDays(startD, i)) === day) return true;
+      }
+      return false;
+    });
+  };
+
+  // Populate bookings for schedule items (multi-day)
+  for (const evt of s.schedule) {
+    if (evt.status === 'Cancelled') continue;
+
+    const startY = evt.date;
+    const dur = Number(evt.durationDays) || 1;
+    const startD = new Date(startY + 'T00:00:00');
+    for (let i = 0; i < dur; i++) {
+      const d = ymd(addDays(startD, i));
+      if (!inWindow(d)) continue;
+      addBooking(d, evt.assignedPeopleIdsCsv, evt.assignedMachineIdsCsv);
+    }
+  }
+
+  // Evaluate items (count start-day only to avoid double counting multi-day blocks)
+  let ready = 0;
+  let atRisk = 0;
+  let blocked = 0;
+
+  for (const evt of s.schedule) {
+    if (!inWindow(evt.date)) continue;
+
+    if (evt.status === 'Issue' || evt.status === 'Quarantine' || evt.status === 'Cancelled') {
+      blocked++;
+      continue;
+    }
+
+    const pIds = parseCsv(evt.assignedPeopleIdsCsv);
+    const mIds = parseCsv(evt.assignedMachineIdsCsv);
+
+    const counts = byDay[evt.date];
+    const doubleBooked =
+      pIds.some((p) => (counts.people[p] ?? 0) > 1) || mIds.some((m) => (counts.machines[m] ?? 0) > 1);
+
+    const maintClash = mIds.some((m) => maintenanceBooking(m, evt.date));
+
+    if (doubleBooked || maintClash) atRisk++;
+    else ready++;
+  }
+
+  return { ready, atRisk, blocked };
 }
