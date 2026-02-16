@@ -11,10 +11,13 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "docx": "^9.0.0",
+    "file-saver": "^2.0.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "recharts": "^2.15.1",
-    "@supabase/supabase-js": "^2.49.1"
+    "xlsx": "^0.19.3"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
@@ -28,9 +31,4 @@
     "vite": "^5.4.10",
     "vitest": "^2.1.4"
   }
-}
-"dependencies": {
-  "docx": "^9.0.0",
-  "file-saver": "^2.0.5",
-  "xlsx": "^0.19.3"
 }
