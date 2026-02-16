@@ -112,14 +112,55 @@ export default function App() {
   };
 
   if (loading) {
-    return (
-      <AuthGate>
-      <div className="app">
-        <h1>Ops & Production Dashboard</h1>
-        <div className="card">Loading…</div>
+   return (
+  <AuthGate>
+    <div className="app">
+      <h1>Ops & Production Dashboard</h1>
+      <div className="small">
+        Currency: <b>AUD</b> · Sync: {syncStatus}
       </div>
-      </AuthGate>
-    );
+
+      <div className="header">
+        <select
+          value={state.selectedScenario}
+          onChange={(e) => setState((s: AppState) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))}
+        >
+          {(['Pilot', 'Ramp', 'Scale'] as ScenarioName[]).map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+
+        <button
+          onClick={() => {
+            const target: ScenarioName =
+              state.selectedScenario === 'Pilot' ? 'Ramp' : state.selectedScenario === 'Ramp' ? 'Scale' : 'Pilot';
+            setState(duplicateScenario(state, state.selectedScenario, target));
+          }}
+        >
+          Duplicate Scenario
+        </button>
+
+        <button
+          onClick={() =>
+            downloadFile(`${scenario.name}.json`, exportScenarioJson(scenario as any), 'application/json')
+          }
+        >
+          Export JSON
+        </button>
+
+        <button onClick={() => exportReportXlsx(scenario as any)}>Export XLSX Report</button>
+
+        <button onClick={() => exportReportDocx(scenario as any)}>Export Word Report</button>
+      </div>
+
+      {/* keep EVERYTHING else exactly as you already have it */}
+      {/* KPIs, tabs, tab content, audit log... */}
+
+    </div>
+  </AuthGate>
+);
   }
 
   return (
