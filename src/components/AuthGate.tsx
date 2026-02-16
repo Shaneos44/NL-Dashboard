@@ -105,18 +105,40 @@ export function AuthGate(props: { children: React.ReactNode }) {
 
   // Signed in → render app
   return (
-    <>
-      <div className="small" style={{ marginBottom: 8 }}>
-        Signed in ·{' '}
-        <button
-          onClick={async () => {
-            await sb.auth.signOut();
-          }}
-        >
-          Sign out
-        </button>
-      </div>
-      {children}
-    </>
-  );
+  <>
+    <div
+      style={{
+        position: 'sticky',
+        top: 0,
+        zIndex: 9999,
+        padding: '10px 12px',
+        background: '#111',
+        color: 'white',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderBottom: '1px solid rgba(255,255,255,0.15)',
+      }}
+    >
+      <div style={{ fontWeight: 700 }}>✅ Signed in</div>
+      <button
+        style={{
+          padding: '6px 10px',
+          borderRadius: 10,
+          background: '#fff',
+          color: '#111',
+          border: 'none',
+          cursor: 'pointer',
+        }}
+        onClick={async () => {
+          await sb.auth.signOut();
+          setSession(null);
+        }}
+      >
+        Sign out
+      </button>
+    </div>
+    {children}
+  </>
+);
 }
