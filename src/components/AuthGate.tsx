@@ -14,11 +14,11 @@ export function AuthGate(props: { children: React.ReactNode }) {
     if (!supabase) return;
     const sb = supabase; // now TypeScript knows it's not null past the guard
 
-    supabase.auth.getSession().then(({ data }) => {
+    sb.auth.getSession().then(({ data }) => {
       setSession(data.session ?? null);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: sub } = sb.auth.onAuthStateChange((_event, s) => {
       setSession(s);
     });
 
@@ -60,7 +60,7 @@ export function AuthGate(props: { children: React.ReactNode }) {
               setErr(null);
               setSent(false);
               try {
-                const { error } = await supabase.auth.signInWithOtp({
+                const { error } = await sb.auth.signInWithOtp({
                   email,
                   options: {
                     // important for GitHub Pages + magic link return
@@ -102,7 +102,7 @@ export function AuthGate(props: { children: React.ReactNode }) {
         Signed in ·{' '}
         <button
           onClick={async () => {
-            await supabase.auth.signOut();
+            await sb.auth.signOut();
           }}
         >
           Sign out
