@@ -5,6 +5,7 @@ import { EditableTable } from './components/EditableTable';
 import { KpiCard } from './components/KpiCard';
 import { ProductionCalendar } from './components/ProductionCalendar';
 import { MaintenancePlanner } from './components/MaintenancePlanner';
+import { exportReportDocx, exportReportXlsx } from './lib/report';
 
 import type { ScenarioName } from './lib/types';
 import type { AppState } from './lib/store';
