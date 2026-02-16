@@ -29,3 +29,8 @@
     "vitest": "^2.1.4"
   }
 }
+"dependencies": {
+  "docx": "^9.0.0",
+  "file-saver": "^2.0.5",
+  "xlsx": "^0.19.3"
+}
