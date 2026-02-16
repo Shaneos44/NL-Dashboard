@@ -5,14 +5,15 @@ import './styles.css';
 export function AuthGate(props: { children: React.ReactNode }) {
   const { children } = props;
 
+  const sb = supabase; // <— component-scope alias (can be null)
+
   const [session, setSession] = useState<any>(null);
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!supabase) return;
-    const sb = supabase; // now TypeScript knows it's not null past the guard
+    if (!sb) return;
 
     sb.auth.getSession().then(({ data }) => {
       setSession(data.session ?? null);
@@ -23,19 +24,25 @@ export function AuthGate(props: { children: React.ReactNode }) {
     });
 
     return () => sub.subscription.unsubscribe();
-  }, []);
+  }, [sb]);
 
-  if (!supabase) {
+  // If supabase is not configured at build/runtime, block and show instructions
+  if (!sb) {
     return (
-      <div className="card">
-        <h3>Supabase not configured</h3>
-        <div className="small">
-          Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in GitHub Secrets.
+      <div className="app">
+        <h1>Ops & Production Dashboard</h1>
+        <div className="card">
+          <h3>Supabase not configured</h3>
+          <div className="small">
+            Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in your GitHub Pages build
+            environment. This app requires Supabase Auth to load/save data.
+          </div>
         </div>
       </div>
     );
   }
 
+  // Not signed in yet → show login screen
   if (!session) {
     return (
       <div className="app">
@@ -43,7 +50,7 @@ export function AuthGate(props: { children: React.ReactNode }) {
         <div className="card">
           <h3>Sign in</h3>
           <div className="small">
-            This dashboard uses Supabase Auth (Path B). You must sign in to load/save data.
+            This dashboard uses Supabase Auth. Sign in to load/save your data across devices.
           </div>
 
           <label>
@@ -63,7 +70,7 @@ export function AuthGate(props: { children: React.ReactNode }) {
                 const { error } = await sb.auth.signInWithOtp({
                   email,
                   options: {
-                    // important for GitHub Pages + magic link return
+                    // GitHub Pages safe redirect (must also be whitelisted in Supabase Auth settings)
                     emailRedirectTo: window.location.origin + window.location.pathname,
                   },
                 });
@@ -96,6 +103,7 @@ export function AuthGate(props: { children: React.ReactNode }) {
     );
   }
 
+  // Signed in → render app
   return (
     <>
       <div className="small" style={{ marginBottom: 8 }}>
