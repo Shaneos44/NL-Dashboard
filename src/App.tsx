@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { AuthGate } from './components/AuthGate';
+import { supabase } from './lib/supabase';
+
 import './components/styles.css';
 import { EditableTable } from './components/EditableTable';
 import { KpiCard } from './components/KpiCard';
