@@ -147,6 +147,9 @@ export default function App() {
         </button>
 
         <button onClick={() => downloadFile(`${scenario.name}.json`, exportScenarioJson(scenario as any), 'application/json')}>
+          <button onClick={() => exportReportXlsx(scenario as any)}>Export XLSX Report</button>
+<button onClick={() => exportReportDocx(scenario as any)}>Export Word Report</button>
+
           Export JSON
         </button>
       </div>
