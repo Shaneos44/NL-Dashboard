@@ -12,6 +12,7 @@ export function AuthGate(props: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!supabase) return;
+    const sb = supabase; // now TypeScript knows it's not null past the guard
 
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session ?? null);
