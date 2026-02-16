@@ -113,10 +113,12 @@ export default function App() {
 
   if (loading) {
     return (
+      <AuthGate>
       <div className="app">
         <h1>Ops & Production Dashboard</h1>
         <div className="card">Loading…</div>
       </div>
+        <AuthGate>
     );
   }
 
