@@ -118,7 +118,7 @@ export default function App() {
         <h1>Ops & Production Dashboard</h1>
         <div className="card">Loading…</div>
       </div>
-        <AuthGate>
+      </AuthGate>
     );
   }
 
@@ -151,12 +151,21 @@ export default function App() {
           Duplicate Scenario
         </button>
 
-        <button onClick={() => downloadFile(`${scenario.name}.json`, exportScenarioJson(scenario as any), 'application/json')}>
-          <button onClick={() => exportReportXlsx(scenario as any)}>Export XLSX Report</button>
-<button onClick={() => exportReportDocx(scenario as any)}>Export Word Report</button>
+        <button
+  onClick={() =>
+    downloadFile(`${scenario.name}.json`, exportScenarioJson(scenario as any), 'application/json')
+  }
+>
+  Export JSON
+</button>
 
-          Export JSON
-        </button>
+<button onClick={() => exportReportXlsx(scenario as any)}>
+  Export XLSX Report
+</button>
+
+<button onClick={() => exportReportDocx(scenario as any)}>
+  Export Word Report
+</button>
       </div>
 
       <div className="kpis">
