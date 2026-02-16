@@ -55,8 +55,6 @@ export function ProductionCalendar(props: {
 
   const [weekStart, setWeekStart] = useState(() => mondayOfWeek(new Date()));
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
-
-  // New: toggle to move the whole batch chain together
   const [moveWholeBatch, setMoveWholeBatch] = useState(true);
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -87,7 +85,6 @@ export function ProductionCalendar(props: {
     });
   };
 
-  // Build a per-day booking map to detect conflicts
   const conflictsByDay = useMemo(() => {
     const map: Record<
       string,
@@ -96,7 +93,6 @@ export function ProductionCalendar(props: {
         machines: Record<string, number>;
       }
     > = {};
-
     for (const d of dayStrings) map[d] = { people: {}, machines: {} };
 
     const consider = (evt: ScheduledProcess, date: string) => {
@@ -107,12 +103,10 @@ export function ProductionCalendar(props: {
         map[date].people[pid] = (map[date].people[pid] ?? 0) + 1;
       }
       for (const mid of parseCsv(evt.assignedMachineIdsCsv)) {
-        // maintenance counts as a booking too (handled separately in warnings)
         map[date].machines[mid] = (map[date].machines[mid] ?? 0) + 1;
       }
     };
 
-    // Count schedule bookings per day (including multi-day spans)
     for (const evt of scenario.schedule) {
       const start = evt.date;
       const dur = Number(evt.durationDays) || 1;
@@ -129,13 +123,11 @@ export function ProductionCalendar(props: {
   const eventHasConflictOnDay = (evt: ScheduledProcess, day: string) => {
     const people = parseCsv(evt.assignedPeopleIdsCsv);
     const machines = parseCsv(evt.assignedMachineIdsCsv);
-
     const counts = conflictsByDay[day];
     if (!counts) return false;
 
     const anyDoubleBooked =
       people.some((p) => (counts.people[p] ?? 0) > 1) || machines.some((m) => (counts.machines[m] ?? 0) > 1);
-
     const anyMaintenanceClash = machines.some((m) => machineBlockedByMaintenance(m, day));
     return anyDoubleBooked || anyMaintenanceClash;
   };
@@ -143,15 +135,13 @@ export function ProductionCalendar(props: {
   const unscheduledBatches = scenario.batches.filter((b) => !scenario.schedule.some((e) => e.batchId === b.id));
 
   const createChainForBatchOnDay = (batchId: string, startDay: string) => {
-    // New: auto-create a full process chain on drop
-    // One ScheduledProcess per process template, sequential days.
     const processes = scenario.processes;
     const baseDate = new Date(startDay + 'T00:00:00');
 
     const created: ScheduledProcess[] = processes.map((p, idx) => ({
       id: crypto.randomUUID(),
       batchId,
-      date: ymd(addDays(baseDate, idx)), // sequential
+      date: ymd(addDays(baseDate, idx)),
       durationDays: 1,
       processId: p.id,
       assignedPeopleIdsCsv: '',
@@ -166,7 +156,6 @@ export function ProductionCalendar(props: {
       `Scheduled full process chain for ${getBatchLabel(batchId)} starting ${startDay}`
     );
 
-    // select first created item
     if (created[0]) setSelectedEventId(created[0].id);
   };
 
@@ -175,14 +164,12 @@ export function ProductionCalendar(props: {
     if (!evt) return;
 
     if (!moveWholeBatch) {
-      // move only this event
       const next = scenario.schedule.map((e) => (e.id === eventId ? { ...e, date: targetDay } : e));
       onChange({ ...scenario, schedule: next }, `Moved scheduled item to ${targetDay}`);
       setSelectedEventId(eventId);
       return;
     }
 
-    // move whole batch chain by delta
     const delta = daysBetween(evt.date, targetDay);
     const next = scenario.schedule.map((e) => {
       if (e.batchId !== evt.batchId) return e;
@@ -219,6 +206,25 @@ export function ProductionCalendar(props: {
     setSelectedEventId(null);
   };
 
+  const deleteBatch = (batchId: string) => {
+    const b = getBatch(batchId);
+    const label = b?.batchNumber ?? batchId;
+
+    const nextBatches = scenario.batches.filter((x) => x.id !== batchId);
+    const nextSchedule = scenario.schedule.filter((x) => x.batchId !== batchId);
+
+    // Unlink CAPAs that referenced the deleted batch (don’t delete CAPAs automatically)
+    const nextCapas = scenario.capas.map((c) => (c.batchId === batchId ? { ...c, batchId: '' } : c));
+
+    // If we deleted the selected item, clear selection
+    if (selectedEvent?.batchId === batchId) setSelectedEventId(null);
+
+    onChange(
+      { ...scenario, batches: nextBatches, schedule: nextSchedule, capas: nextCapas },
+      `Deleted batch ${label} (and removed its schedule chain)`
+    );
+  };
+
   const personName = (id: string) => scenario.people.find((p) => p.id === id)?.name ?? id;
   const machineName = (id: string) => scenario.machines.find((m) => m.id === id)?.name ?? id;
 
@@ -237,7 +243,7 @@ export function ProductionCalendar(props: {
             1) Create / edit batches (left).<br />
             2) Drag a batch onto a calendar day → auto-creates the full process chain.<br />
             3) Click a calendar item to assign people/machines and update status.<br />
-            4) When schedule items are <b>Complete</b>, Stock updates (good + scrap rules).<br />
+            4) When schedule items are <b>Complete</b>, Stock updates (good + scrap rules, now stage-aware).<br />
           </div>
         </div>
 
@@ -257,6 +263,7 @@ export function ProductionCalendar(props: {
               title={b.purpose}
             >
               <b>{b.batchNumber}</b> · {b.plannedQty} planned · {b.status}
+              {b.purpose ? <div className="tiny">{b.purpose}</div> : null}
             </div>
           ))}
         </div>
@@ -264,7 +271,7 @@ export function ProductionCalendar(props: {
         <div className="card">
           <h3>Batches</h3>
           <div className="hint">
-            Update <b>Good</b> + <b>Scrap</b>. Assembly scrap uses component rejects; post-assembly scrap writes off full BOM.
+            Edit batch number + purpose. Delete removes the batch + its schedule chain; CAPAs are unlinked (not deleted).
           </div>
 
           <div className="table-wrap">
@@ -272,28 +279,41 @@ export function ProductionCalendar(props: {
               <thead>
                 <tr>
                   <th>Batch</th>
+                  <th>Purpose</th>
                   <th>Planned</th>
                   <th>Good</th>
                   <th>Scrap stage</th>
                   <th>Scrap</th>
                   <th>Status</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
                 {scenario.batches.map((b) => (
                   <tr key={b.id}>
                     <td>
-  <input
-    value={b.batchNumber}
-    onChange={(e) => {
-      const next = scenario.batches.map((x) =>
-        x.id === b.id ? { ...x, batchNumber: e.target.value } : x
-      );
-      onChange({ ...scenario, batches: next }, `Renamed batch ${b.batchNumber} → ${e.target.value}`);
-    }}
-  />
-</td>
-
+                      <input
+                        value={b.batchNumber}
+                        onChange={(e) => {
+                          const next = scenario.batches.map((x) =>
+                            x.id === b.id ? { ...x, batchNumber: e.target.value } : x
+                          );
+                          onChange({ ...scenario, batches: next }, `Renamed batch ${b.batchNumber} → ${e.target.value}`);
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={b.purpose}
+                        placeholder="e.g. Customer order / Validation"
+                        onChange={(e) => {
+                          const next = scenario.batches.map((x) =>
+                            x.id === b.id ? { ...x, purpose: e.target.value } : x
+                          );
+                          onChange({ ...scenario, batches: next }, `Updated purpose (${b.batchNumber})`);
+                        }}
+                      />
+                    </td>
                     <td>
                       <input
                         type="number"
@@ -360,6 +380,11 @@ export function ProductionCalendar(props: {
                           </option>
                         ))}
                       </select>
+                    </td>
+                    <td>
+                      <button className="danger" onClick={() => deleteBatch(b.id)}>
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -431,16 +456,13 @@ export function ProductionCalendar(props: {
               />
               Move whole batch chain when dragging events
             </label>
-            <div className="tiny">
-              Tip: drag events to re-plan. Conflicts show as ⚠.
-            </div>
+            <div className="tiny">Tip: drag events to re-plan. Conflicts show as ⚠.</div>
           </div>
 
           <div className="cal-grid">
             {dayStrings.map((day, idx) => {
               const dObj = days[idx];
 
-              // Render events that overlap this day (multi-day)
               const events = scenario.schedule.filter((e) => {
                 const start = e.date;
                 const dur = Number(e.durationDays) || 1;
@@ -473,11 +495,8 @@ export function ProductionCalendar(props: {
                     const id = e.dataTransfer.getData('id');
                     if (!kind || !id) return;
 
-                    if (kind === 'batch') {
-                      createChainForBatchOnDay(id, day);
-                    } else if (kind === 'event') {
-                      moveEventOrBatchToDay(id, day);
-                    }
+                    if (kind === 'batch') createChainForBatchOnDay(id, day);
+                    else if (kind === 'event') moveEventOrBatchToDay(id, day);
                   }}
                 >
                   <div className="cal-col-head">{fmtDay(dObj)}</div>
@@ -498,7 +517,7 @@ export function ProductionCalendar(props: {
                         className={`cal-item ${statusClass(e.status)} ${conflict ? 'cal-conflict' : ''} ${
                           isStartDay ? 'cal-start' : 'cal-continued'
                         }`}
-                        draggable={isStartDay} // drag only from start block
+                        draggable={isStartDay}
                         onDragStart={(ev) => {
                           ev.dataTransfer.setData('kind', 'event');
                           ev.dataTransfer.setData('id', e.id);
