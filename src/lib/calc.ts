@@ -20,7 +20,6 @@ function scrapMultiplier(s: ScenarioData): number {
   const scrap = s.inputs.scrapRatePct ?? 0;
   return 1 + Math.max(0, scrap);
 }
-
 function holdingRateMonthly(s: ScenarioData): number {
   const annual = s.inputs.holdingRatePctAnnual ?? 0.24;
   return annual / 12;
@@ -65,18 +64,6 @@ export function computeCostBreakdown(s: ScenarioData): CostBreakdown {
   };
 }
 
-function ymd(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
-function addDays(date: Date, days: number) {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
-}
-function parseCsv(s: string) {
-  return s.split(',').map((x) => x.trim()).filter(Boolean);
-}
-
 function findStockIdByName(s: ScenarioData, name: string): string | null {
   const n = name.trim().toLowerCase();
   const match = s.stock.find((i) => i.name.trim().toLowerCase() === n);
@@ -108,32 +95,54 @@ function addBomConsumption(s: ScenarioData, target: Record<string, number>, unit
   }
 }
 
-// Stock consumption is driven by BATCH outcomes, but only counted when
-// there is at least one scheduled item for that batch marked Complete.
+/**
+ * Stage-aware consumption:
+ * - Assembly-stage completed => consumes BOM for goodQty + assembly scrap (component rejects or BOM fallback)
+ * - Post-Assembly-stage completed => if batch scrapStage is Post-Assembly => consumes BOM for scrapQty
+ */
 export function stockConsumptionFromCompletedBatches(s: ScenarioData): Record<string, number> {
   const consumed: Record<string, number> = {};
   for (const it of s.stock) consumed[it.id] = 0;
 
-  const completedBatchIds = new Set(s.schedule.filter((x) => x.status === 'Complete').map((x) => x.batchId));
+  const processById = new Map(s.processes.map((p) => [p.id, p]));
+
+  const assemblyComplete = new Set<string>();
+  const postComplete = new Set<string>();
+
+  for (const evt of s.schedule) {
+    if (evt.status !== 'Complete') continue;
+    const p = processById.get(evt.processId);
+    if (!p) continue;
+
+    if (p.stage === 'Assembly') assemblyComplete.add(evt.batchId);
+    else postComplete.add(evt.batchId);
+  }
 
   for (const b of s.batches) {
-    if (!completedBatchIds.has(b.id)) continue;
-
-    addBomConsumption(s, consumed, Number(b.goodQty) || 0);
-
+    const good = Number(b.goodQty) || 0;
     const scrapQty = Number(b.scrapQty) || 0;
-    if (!scrapQty) continue;
 
-    if (b.scrapStage === 'Post-Assembly') {
-      addBomConsumption(s, consumed, scrapQty);
-    } else {
-      const compRejects = parseItemQtyLinesToIdQty(s, b.componentRejects);
-      if (Object.keys(compRejects).length === 0) {
-        addBomConsumption(s, consumed, scrapQty);
-      } else {
-        for (const id of Object.keys(compRejects)) {
-          consumed[id] = (consumed[id] ?? 0) + compRejects[id];
+    // Assembly stage drives material usage for "built" units (good + any assembly rejects)
+    if (assemblyComplete.has(b.id)) {
+      addBomConsumption(s, consumed, good);
+
+      if (scrapQty > 0 && b.scrapStage === 'Assembly') {
+        const compRejects = parseItemQtyLinesToIdQty(s, b.componentRejects);
+        if (Object.keys(compRejects).length === 0) {
+          // fallback BOM if rejects not itemised
+          addBomConsumption(s, consumed, scrapQty);
+        } else {
+          for (const id of Object.keys(compRejects)) {
+            consumed[id] = (consumed[id] ?? 0) + compRejects[id];
+          }
         }
+      }
+    }
+
+    // Post-assembly failures scrap whole BOM only after post stage is complete
+    if (postComplete.has(b.id)) {
+      if (scrapQty > 0 && b.scrapStage === 'Post-Assembly') {
+        addBomConsumption(s, consumed, scrapQty);
       }
     }
   }
@@ -197,17 +206,25 @@ export function summaryAlerts(s: ScenarioData): {
 }
 
 /**
- * Executive scheduling indicator:
- * - Ready: scheduled items in next 7 days that are Planned/In Progress with no conflicts
- * - At risk: scheduled items in next 7 days with conflicts (double-booking or maintenance clash)
- * - Blocked: schedule items in next 7 days in Issue/Quarantine/Cancelled
+ * Existing executive indicator (kept)
  */
+function ymd(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+function addDays(date: Date, days: number) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+function parseCsv(s: string) {
+  return s.split(',').map((x) => x.trim()).filter(Boolean);
+}
+
 export function scheduleRiskSummary(s: ScenarioData): { ready: number; atRisk: number; blocked: number } {
   const start = new Date();
   const days = Array.from({ length: 7 }, (_, i) => ymd(addDays(start, i)));
   const inWindow = (date: string) => days.includes(date);
 
-  // Booking counts per day
   const byDay: Record<string, { people: Record<string, number>; machines: Record<string, number> }> = {};
   for (const d of days) byDay[d] = { people: {}, machines: {} };
 
@@ -217,7 +234,6 @@ export function scheduleRiskSummary(s: ScenarioData): { ready: number; atRisk: n
     for (const mid of parseCsv(machinesCsv)) byDay[day].machines[mid] = (byDay[day].machines[mid] ?? 0) + 1;
   };
 
-  // Maintenance blocks count as machine bookings (conflict trigger)
   const maintenanceBooking = (machineId: string, day: string) => {
     return s.maintenanceBlocks.some((mb) => {
       if (mb.status === 'Cancelled') return false;
@@ -234,7 +250,6 @@ export function scheduleRiskSummary(s: ScenarioData): { ready: number; atRisk: n
     });
   };
 
-  // Populate bookings for schedule items (multi-day)
   for (const evt of s.schedule) {
     if (evt.status === 'Cancelled') continue;
 
@@ -248,7 +263,6 @@ export function scheduleRiskSummary(s: ScenarioData): { ready: number; atRisk: n
     }
   }
 
-  // Evaluate items (count start-day only to avoid double counting multi-day blocks)
   let ready = 0;
   let atRisk = 0;
   let blocked = 0;
