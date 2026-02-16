@@ -11,11 +11,11 @@ export interface PlanningDecision {
 
 export interface CapaItem {
   id: string;
-  ref: string; // CAPA-001
+  ref: string;
   batchId?: string;
   title: string;
   owner: string;
-  dueDate: string; // YYYY-MM-DD
+  dueDate: string;
   status: 'Open' | 'In progress' | 'Effectiveness check' | 'Closed' | 'Cancelled';
   rootCause: string;
   action: string;
@@ -23,14 +23,14 @@ export interface CapaItem {
 }
 
 export interface GlobalInputs {
-  salePricePerUnit: number; // AUD
+  salePricePerUnit: number;
   monthlyDemand: number;
 
   availableMinutesPerMonth: number;
   oee: number;
   downtimePct: number;
 
-  labourRatePerHour: number; // AUD/hr
+  labourRatePerHour: number;
   labourMinutesPerUnit: number;
 
   qualityCostPerUnit: number;
@@ -50,18 +50,15 @@ export interface StockItem {
   name: string;
   type: 'Component' | 'Consumable' | 'Packaging' | 'Spare';
   unitCost: number;
-  uom: string; // pcs, m, L
+  uom: string;
   location: string;
 
-  // For finished unit BOM usage (used for post-assembly failures and good units)
   usagePerFinishedUnit: number;
 
-  // Replenishment
   leadTimeDays: number;
   moq: number;
   singleSource: boolean;
 
-  // Physical stock
   onHandQty: number;
   reorderPointQty?: number;
   minQty?: number;
@@ -96,16 +93,17 @@ export interface Person {
 export interface MachineAsset {
   id: string;
   name: string;
-  type: string; // e.g. "Assembly Line", "Test Bench"
+  type: string;
   status: 'Available' | 'In Use' | 'Out of Service';
   notes: string;
 }
 
 export interface ProcessTemplate {
   id: string;
-  name: string; // e.g. "Final Assembly"
+  name: string;
+  stage: 'Assembly' | 'Post-Assembly';
   defaultDurationMin: number;
-  allowedMachineTypesCsv: string; // comma list of MachineAsset.type values
+  allowedMachineTypesCsv: string;
   notes: string;
 }
 
@@ -125,18 +123,11 @@ export interface ProductionBatch {
 
   plannedQty: number;
 
-  // outcomes (editable)
   goodQty: number;
 
-  // Scrap rules:
-  // - Assembly: component-level rejects (entered per component)
-  // - Post-Assembly: whole BOM rejected (finished unit fails after assembly)
   scrapStage: 'Assembly' | 'Post-Assembly';
-
   scrapQty: number;
 
-  // Component rejects used when scrapStage === 'Assembly'
-  // Format: one per line "Item Name, Qty"
   componentRejects: string;
 
   status: BatchStatus;
@@ -149,13 +140,12 @@ export interface ScheduledProcess {
   id: string;
   batchId: string;
 
-  // scheduled
-  date: string; // YYYY-MM-DD
-  durationDays: number; // assign each process to a day, and how many days it spans
+  date: string;
+  durationDays: number;
 
-  processId: string; // ProcessTemplate.id
-  assignedPeopleIdsCsv: string; // comma-separated person IDs
-  assignedMachineIdsCsv: string; // comma-separated machine IDs
+  processId: string;
+  assignedPeopleIdsCsv: string;
+  assignedMachineIdsCsv: string;
 
   status: BatchStatus;
   notes: string;
@@ -164,7 +154,7 @@ export interface ScheduledProcess {
 
 export interface MaintenanceBlock {
   id: string;
-  date: string; // YYYY-MM-DD
+  date: string;
   durationDays: number;
   machineIdsCsv: string;
   title: string;
@@ -183,24 +173,20 @@ export interface RiskEntry {
 export interface ScenarioData {
   name: ScenarioName;
 
-  // tracking
   decisions: PlanningDecision[];
   capas: CapaItem[];
 
   inputs: GlobalInputs;
 
-  // master data
   stock: StockItem[];
   people: Person[];
   machines: MachineAsset[];
   processes: ProcessTemplate[];
 
-  // execution
   batches: ProductionBatch[];
   schedule: ScheduledProcess[];
   maintenanceBlocks: MaintenanceBlock[];
 
-  // planning
   logistics: LogisticsLane[];
   warehouses: Warehouse[];
   risks: RiskEntry[];
