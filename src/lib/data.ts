@@ -133,21 +133,23 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
   ],
 
   processes: [
-    {
-      id: 'pr1',
-      name: 'Final Assembly',
-      defaultDurationMin: 480,
-      allowedMachineTypesCsv: 'Assembly Line',
-      notes: '',
-    },
-    {
-      id: 'pr2',
-      name: 'Test & Pack',
-      defaultDurationMin: 480,
-      allowedMachineTypesCsv: 'Test Bench',
-      notes: '',
-    },
-  ],
+  {
+    id: 'pr1',
+    name: 'Final Assembly',
+    stage: 'Assembly',
+    defaultDurationMin: 480,
+    allowedMachineTypesCsv: 'Assembly Line',
+    notes: '',
+  },
+  {
+    id: 'pr2',
+    name: 'Test & Pack',
+    stage: 'Post-Assembly',
+    defaultDurationMin: 480,
+    allowedMachineTypesCsv: 'Test Bench',
+    notes: '',
+  },
+],
 
   batches: [
     {
