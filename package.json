@@ -10,15 +10,16 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.49.1",
-    "docx": "^9.0.0",
-    "file-saver": "^2.0.5",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "recharts": "^2.15.1",
-    "xlsx": "^0.19.3"
-  },
+"dependencies": {
+  "@supabase/supabase-js": "^2.49.1",
+  "docx": "^9.0.0",
+  "file-saver": "^2.0.5",
+  "react": "^18.3.1",
+  "react-dom": "^18.3.1",
+  "recharts": "^2.15.1",
+  "xlsx": "^0.18.5"
+},
+
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
