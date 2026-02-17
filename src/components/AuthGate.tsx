@@ -100,8 +100,11 @@ export function AuthGate(props: { children: React.ReactNode }) {
                     if (error) throw error;
                   } else {
                     const { error } = await sb.auth.signUp({ email, password });
-                    if (error) throw error;
-                    setMsg('Account created. You are now signed in.');
+if (error) throw error;
+
+// Most Supabase configs require a separate sign-in to create a session
+setMsg('Account created and confirmed. Now sign in with the same email + password.');
+setMode('signin');
                   }
                 } catch (e: any) {
                   setErr(e?.message ?? 'Auth failed');
