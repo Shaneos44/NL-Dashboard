@@ -5,11 +5,19 @@ import './styles.css';
 function ymd(d: Date) {
   return d.toISOString().slice(0, 10);
 }
+
 function addDays(date: Date, days: number) {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
   return d;
 }
+
+function addMonths(date: Date, months: number) {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + months);
+  return d;
+}
+
 function mondayOfWeek(d: Date) {
   const date = new Date(d);
   const day = date.getDay(); // 0 Sun .. 6 Sat
@@ -17,15 +25,22 @@ function mondayOfWeek(d: Date) {
   date.setDate(date.getDate() + diff);
   return date;
 }
-function fmtDay(d: Date) {
-  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+function startOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
 }
+
+function fmtMonth(d: Date) {
+  return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+}
+
 function parseCsv(s: string) {
   return s.split(',').map((x) => x.trim()).filter(Boolean);
 }
 function toCsv(arr: string[]) {
   return arr.join(', ');
 }
+
 function daysBetween(aYmd: string, bYmd: string) {
   const a = new Date(aYmd + 'T00:00:00');
   const b = new Date(bYmd + 'T00:00:00');
@@ -47,18 +62,18 @@ function statusClass(s: BatchStatus) {
   return `cal-${s.replace(/\s/g, '').toLowerCase()}`;
 }
 
+const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
 export function ProductionCalendar(props: {
   scenario: ScenarioData;
   onChange: (next: ScenarioData, note?: string) => void;
 }) {
   const { scenario, onChange } = props;
 
-  const [weekStart, setWeekStart] = useState(() => mondayOfWeek(new Date()));
+  // Month cursor (first day of the month)
+  const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [moveWholeBatch, setMoveWholeBatch] = useState(true);
-
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
-  const dayStrings = useMemo(() => days.map((d) => ymd(d)), [days]);
 
   const selectedEvent: ScheduledProcess | undefined = selectedEventId
     ? scenario.schedule.find((e) => e.id === selectedEventId)
@@ -67,6 +82,14 @@ export function ProductionCalendar(props: {
   const getBatch = (batchId: string) => scenario.batches.find((b) => b.id === batchId);
   const getBatchLabel = (batchId: string) => getBatch(batchId)?.batchNumber ?? 'Batch';
   const getProcessName = (processId: string) => scenario.processes.find((p) => p.id === processId)?.name ?? 'Process';
+
+  // Build a 6-week (42-day) grid starting on Monday of the week containing the 1st of month
+  const gridDays = useMemo(() => {
+    const start = mondayOfWeek(startOfMonth(monthCursor));
+    return Array.from({ length: 42 }, (_, i) => addDays(start, i));
+  }, [monthCursor]);
+
+  const gridDayStrings = useMemo(() => gridDays.map((d) => ymd(d)), [gridDays]);
 
   const machineBlockedByMaintenance = (machineId: string, date: string) => {
     return scenario.maintenanceBlocks.some((mb) => {
@@ -85,6 +108,7 @@ export function ProductionCalendar(props: {
     });
   };
 
+  // Conflicts indexed by day (for the whole visible grid)
   const conflictsByDay = useMemo(() => {
     const map: Record<
       string,
@@ -93,7 +117,7 @@ export function ProductionCalendar(props: {
         machines: Record<string, number>;
       }
     > = {};
-    for (const d of dayStrings) map[d] = { people: {}, machines: {} };
+    for (const d of gridDayStrings) map[d] = { people: {}, machines: {} };
 
     const consider = (evt: ScheduledProcess, date: string) => {
       if (!map[date]) return;
@@ -118,7 +142,7 @@ export function ProductionCalendar(props: {
     }
 
     return map;
-  }, [scenario.schedule, dayStrings]);
+  }, [scenario.schedule, gridDayStrings]);
 
   const eventHasConflictOnDay = (evt: ScheduledProcess, day: string) => {
     const people = parseCsv(evt.assignedPeopleIdsCsv);
@@ -216,7 +240,6 @@ export function ProductionCalendar(props: {
     // Unlink CAPAs that referenced the deleted batch (don’t delete CAPAs automatically)
     const nextCapas = scenario.capas.map((c) => (c.batchId === batchId ? { ...c, batchId: '' } : c));
 
-    // If we deleted the selected item, clear selection
     if (selectedEvent?.batchId === batchId) setSelectedEventId(null);
 
     onChange(
@@ -225,14 +248,18 @@ export function ProductionCalendar(props: {
     );
   };
 
-  const personName = (id: string) => scenario.people.find((p) => p.id === id)?.name ?? id;
-  const machineName = (id: string) => scenario.machines.find((m) => m.id === id)?.name ?? id;
-
   const allowedMachineCandidates = (processId: string) => {
     const proc = scenario.processes.find((p) => p.id === processId);
     const allowed = parseCsv(proc?.allowedMachineTypesCsv ?? '');
     return scenario.machines.filter((m) => (allowed.length === 0 ? true : allowed.includes(m.type)));
   };
+
+  const personName = (id: string) => scenario.people.find((p) => p.id === id)?.name ?? id;
+  const machineName = (id: string) => scenario.machines.find((m) => m.id === id)?.name ?? id;
+
+  const todayYmd = ymd(new Date());
+  const monthIndex = monthCursor.getMonth();
+  const monthYear = monthCursor.getFullYear();
 
   return (
     <div className="cal-wrap">
@@ -241,15 +268,15 @@ export function ProductionCalendar(props: {
           <h3>How to use</h3>
           <div className="small">
             1) Create / edit batches (left).<br />
-            2) Drag a batch onto a calendar day → auto-creates the full process chain.<br />
+            2) Drag a batch onto a day → auto-creates the full process chain.<br />
             3) Click a calendar item to assign people/machines and update status.<br />
-            4) When schedule items are <b>Complete</b>, Stock updates (good + scrap rules, now stage-aware).<br />
+            4) Drag calendar items to re-plan (optionally move whole batch chain).<br />
           </div>
         </div>
 
         <div className="card">
           <h3>Unscheduled batches</h3>
-          <div className="hint">Drag a batch onto a day. This will create the full process chain automatically.</div>
+          <div className="hint">Drag a batch onto any day. This creates the full process chain automatically.</div>
           {unscheduledBatches.length === 0 && <div className="small">Nothing unscheduled.</div>}
           {unscheduledBatches.map((b) => (
             <div
@@ -295,9 +322,7 @@ export function ProductionCalendar(props: {
                       <input
                         value={b.batchNumber}
                         onChange={(e) => {
-                          const next = scenario.batches.map((x) =>
-                            x.id === b.id ? { ...x, batchNumber: e.target.value } : x
-                          );
+                          const next = scenario.batches.map((x) => (x.id === b.id ? { ...x, batchNumber: e.target.value } : x));
                           onChange({ ...scenario, batches: next }, `Renamed batch ${b.batchNumber} → ${e.target.value}`);
                         }}
                       />
@@ -307,9 +332,7 @@ export function ProductionCalendar(props: {
                         value={b.purpose}
                         placeholder="e.g. Customer order / Validation"
                         onChange={(e) => {
-                          const next = scenario.batches.map((x) =>
-                            x.id === b.id ? { ...x, purpose: e.target.value } : x
-                          );
+                          const next = scenario.batches.map((x) => (x.id === b.id ? { ...x, purpose: e.target.value } : x));
                           onChange({ ...scenario, batches: next }, `Updated purpose (${b.batchNumber})`);
                         }}
                       />
@@ -319,9 +342,7 @@ export function ProductionCalendar(props: {
                         type="number"
                         value={b.plannedQty}
                         onChange={(e) => {
-                          const next = scenario.batches.map((x) =>
-                            x.id === b.id ? { ...x, plannedQty: Number(e.target.value) } : x
-                          );
+                          const next = scenario.batches.map((x) => (x.id === b.id ? { ...x, plannedQty: Number(e.target.value) } : x));
                           onChange({ ...scenario, batches: next }, `Updated planned qty (${b.batchNumber})`);
                         }}
                       />
@@ -331,9 +352,7 @@ export function ProductionCalendar(props: {
                         type="number"
                         value={b.goodQty}
                         onChange={(e) => {
-                          const next = scenario.batches.map((x) =>
-                            x.id === b.id ? { ...x, goodQty: Number(e.target.value) } : x
-                          );
+                          const next = scenario.batches.map((x) => (x.id === b.id ? { ...x, goodQty: Number(e.target.value) } : x));
                           onChange({ ...scenario, batches: next }, `Updated good qty (${b.batchNumber})`);
                         }}
                       />
@@ -342,9 +361,7 @@ export function ProductionCalendar(props: {
                       <select
                         value={b.scrapStage}
                         onChange={(e) => {
-                          const next = scenario.batches.map((x) =>
-                            x.id === b.id ? { ...x, scrapStage: e.target.value as any } : x
-                          );
+                          const next = scenario.batches.map((x) => (x.id === b.id ? { ...x, scrapStage: e.target.value as any } : x));
                           onChange({ ...scenario, batches: next }, `Updated scrap stage (${b.batchNumber})`);
                         }}
                       >
@@ -357,9 +374,7 @@ export function ProductionCalendar(props: {
                         type="number"
                         value={b.scrapQty}
                         onChange={(e) => {
-                          const next = scenario.batches.map((x) =>
-                            x.id === b.id ? { ...x, scrapQty: Number(e.target.value) } : x
-                          );
+                          const next = scenario.batches.map((x) => (x.id === b.id ? { ...x, scrapQty: Number(e.target.value) } : x));
                           onChange({ ...scenario, batches: next }, `Updated scrap qty (${b.batchNumber})`);
                         }}
                       />
@@ -368,9 +383,7 @@ export function ProductionCalendar(props: {
                       <select
                         value={b.status}
                         onChange={(e) => {
-                          const next = scenario.batches.map((x) =>
-                            x.id === b.id ? { ...x, status: e.target.value as any } : x
-                          );
+                          const next = scenario.batches.map((x) => (x.id === b.id ? { ...x, status: e.target.value as any } : x));
                           onChange({ ...scenario, batches: next }, `Updated batch status (${b.batchNumber})`);
                         }}
                       >
@@ -401,9 +414,7 @@ export function ProductionCalendar(props: {
                 placeholder="Item Name, Qty (one per line)"
                 value={b.componentRejects}
                 onChange={(e) => {
-                  const next = scenario.batches.map((x) =>
-                    x.id === b.id ? { ...x, componentRejects: e.target.value } : x
-                  );
+                  const next = scenario.batches.map((x) => (x.id === b.id ? { ...x, componentRejects: e.target.value } : x));
                   onChange({ ...scenario, batches: next }, `Updated component rejects (${b.batchNumber})`);
                 }}
                 rows={3}
@@ -437,43 +448,44 @@ export function ProductionCalendar(props: {
       <div className="cal-main">
         <div className="card">
           <div className="cal-header">
-            <button onClick={() => setWeekStart(addDays(weekStart, -7))}>← Prev</button>
+            <button onClick={() => setMonthCursor((m) => startOfMonth(addMonths(m, -1)))}>← Prev</button>
+
             <div>
-              <h3 style={{ margin: 0 }}>Production calendar (Week)</h3>
-              <div className="small">
-                {fmtDay(days[0])} → {fmtDay(days[6])}
-              </div>
+              <h3 style={{ margin: 0 }}>Production calendar (Month)</h3>
+              <div className="small">{fmtMonth(monthCursor)}</div>
             </div>
-            <button onClick={() => setWeekStart(addDays(weekStart, 7))}>Next →</button>
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button onClick={() => setMonthCursor(startOfMonth(new Date()))}>Today</button>
+              <button onClick={() => setMonthCursor((m) => startOfMonth(addMonths(m, 1)))}>Next →</button>
+            </div>
           </div>
 
           <div className="cal-toolbar">
             <label className="checkrow">
-              <input
-                type="checkbox"
-                checked={moveWholeBatch}
-                onChange={(e) => setMoveWholeBatch(e.target.checked)}
-              />
+              <input type="checkbox" checked={moveWholeBatch} onChange={(e) => setMoveWholeBatch(e.target.checked)} />
               Move whole batch chain when dragging events
             </label>
-            <div className="tiny">Tip: drag events to re-plan. Conflicts show as ⚠.</div>
+            <div className="tiny">Tip: drag batches onto a day. Drag events to reschedule. Conflicts show ⚠.</div>
           </div>
 
-          <div className="cal-grid">
-            {dayStrings.map((day, idx) => {
-              const dObj = days[idx];
+          {/* Weekday header row */}
+          <div className="cal-dow">
+            {DOW.map((d) => (
+              <div key={d} className="cal-dow-cell">
+                {d}
+              </div>
+            ))}
+          </div>
 
-              const events = scenario.schedule.filter((e) => {
-                const start = e.date;
-                const dur = Number(e.durationDays) || 1;
-                const startDate = new Date(start + 'T00:00:00');
-                for (let i = 0; i < dur; i++) {
-                  if (ymd(addDays(startDate, i)) === day) return true;
-                }
-                return false;
-              });
+          {/* Month grid */}
+          <div className="cal-month-grid">
+            {gridDayStrings.map((day, idx) => {
+              const dObj = gridDays[idx];
+              const isThisMonth = dObj.getMonth() === monthIndex && dObj.getFullYear() === monthYear;
 
-              const maint = scenario.maintenanceBlocks.filter((mb) => {
+              // Show maintenance blocks that touch this day (small marker)
+              const maintCount = scenario.maintenanceBlocks.filter((mb) => {
                 if (mb.status === 'Cancelled') return false;
                 const start = mb.date;
                 const dur = Number(mb.durationDays) || 1;
@@ -482,12 +494,26 @@ export function ProductionCalendar(props: {
                   if (ymd(addDays(startDate, i)) === day) return true;
                 }
                 return false;
-              });
+              }).length;
+
+              // MONTH view: only render events that START on this day (keeps it usable)
+              const eventsStarting = scenario.schedule.filter((e) => e.date === day);
+
+              // Show tiny “+N” indicator if there are events continuing into this day
+              const continuingCount = scenario.schedule.filter((e) => {
+                if (e.date === day) return false;
+                const startDate = new Date(e.date + 'T00:00:00');
+                const dur = Number(e.durationDays) || 1;
+                for (let i = 0; i < dur; i++) {
+                  if (ymd(addDays(startDate, i)) === day) return true;
+                }
+                return false;
+              }).length;
 
               return (
                 <div
                   key={day}
-                  className="cal-col"
+                  className={`cal-day ${isThisMonth ? '' : 'cal-outside'} ${day === todayYmd ? 'cal-today' : ''}`}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault();
@@ -499,25 +525,21 @@ export function ProductionCalendar(props: {
                     else if (kind === 'event') moveEventOrBatchToDay(id, day);
                   }}
                 >
-                  <div className="cal-col-head">{fmtDay(dObj)}</div>
-
-                  {maint.map((mb) => (
-                    <div key={mb.id} className="cal-item cal-maint" title={mb.notes}>
-                      🛠 {mb.title} · {mb.durationDays}d
+                  <div className="cal-day-head">
+                    <div className="cal-date">{dObj.getDate()}</div>
+                    <div className="cal-day-badges">
+                      {maintCount > 0 ? <span className="cal-badge">🛠 {maintCount}</span> : null}
+                      {continuingCount > 0 ? <span className="cal-badge">↪ {continuingCount}</span> : null}
                     </div>
-                  ))}
+                  </div>
 
-                  {events.map((e) => {
+                  {eventsStarting.slice(0, 4).map((e) => {
                     const conflict = eventHasConflictOnDay(e, day);
-                    const isStartDay = e.date === day;
-
                     return (
                       <div
-                        key={`${e.id}-${day}`}
-                        className={`cal-item ${statusClass(e.status)} ${conflict ? 'cal-conflict' : ''} ${
-                          isStartDay ? 'cal-start' : 'cal-continued'
-                        }`}
-                        draggable={isStartDay}
+                        key={e.id}
+                        className={`cal-item cal-item-compact ${statusClass(e.status)} ${conflict ? 'cal-conflict' : ''} cal-start`}
+                        draggable
                         onDragStart={(ev) => {
                           ev.dataTransfer.setData('kind', 'event');
                           ev.dataTransfer.setData('id', e.id);
@@ -525,18 +547,18 @@ export function ProductionCalendar(props: {
                         onClick={() => setSelectedEventId(e.id)}
                         title={conflict ? '⚠ Conflict detected (double-booking or maintenance clash)' : 'Click to edit'}
                       >
-                        <div className="small">
-                          <b>{getBatchLabel(e.batchId)}</b> · {getProcessName(e.processId)}{' '}
-                          {conflict ? <span className="warn">⚠</span> : null}
-                        </div>
                         <div className="tiny">
-                          {e.durationDays}d · {e.status} {isStartDay ? '' : '· continued'}
+                          <b>{getBatchLabel(e.batchId)}</b> · {getProcessName(e.processId)} {conflict ? <span className="warn">⚠</span> : null}
+                        </div>
+                        <div className="tiny" style={{ opacity: 0.85 }}>
+                          {e.durationDays}d · {e.status}
                         </div>
                       </div>
                     );
                   })}
 
-                  {events.length === 0 && <div className="cal-empty small">Drop batch here</div>}
+                  {eventsStarting.length === 0 ? <div className="cal-empty small">Drop batch here</div> : null}
+                  {eventsStarting.length > 4 ? <div className="tiny">+{eventsStarting.length - 4} more…</div> : null}
                 </div>
               );
             })}
@@ -662,6 +684,7 @@ export function ProductionCalendar(props: {
                 Notes
                 <textarea value={selectedEvent.notes} onChange={(e) => updateEvent({ notes: e.target.value })} rows={3} />
               </label>
+
               <label>
                 Observations
                 <textarea
