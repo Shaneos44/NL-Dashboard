@@ -6,8 +6,8 @@ const STORAGE_KEY = 'neolink-gtm-dashboard-v1';
 const SCENARIO_TABLE = 'scenarios';
 
 export interface AppState {
-  selectedScenario: ScenarioName;
-  scenarios: Record<ScenarioName, ScenarioData>;
+  selectedScenario: string;
+  scenarios: Record<string, ScenarioData>;
 }
 
 interface ScenarioRow {
@@ -17,7 +17,9 @@ interface ScenarioRow {
 
 export const defaultState: AppState = {
   selectedScenario: 'Pilot',
-  scenarios: defaultScenarios,
+  scenarios: {
+  scenarios: defaultScenarios('Pilot'),
+  },
 };
 
 function loadStateLocal(): AppState {
