@@ -17,9 +17,7 @@ interface ScenarioRow {
 
 export const defaultState: AppState = {
   selectedScenario: 'Pilot',
-  scenarios: {
-  scenarios: defaultScenarios('Pilot'),
-  },
+  scenarios: defaultScenarios,
 };
 
 function loadStateLocal(): AppState {
