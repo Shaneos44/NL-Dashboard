@@ -149,29 +149,86 @@ export default function App() {
 
             <div className="header">
               <select
-                value={state.selectedScenario}
-                onChange={(e) => setState((s: AppState) => ({ ...s, selectedScenario: e.target.value as ScenarioName }))}
-              >
-                {(['Pilot', 'Ramp', 'Scale'] as ScenarioName[]).map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
+  value={state.selectedScenario}
+  onChange={(e) => setState((s) => ({ ...s, selectedScenario: e.target.value }))}
+>
+  {Object.keys(state.scenarios).map((name) => (
+    <option key={name} value={name}>
+      {name}
+    </option>
+  ))}
+</select>
 
-              <button
-                onClick={() => {
-                  const target: ScenarioName =
-                    state.selectedScenario === 'Pilot'
-                      ? 'Ramp'
-                      : state.selectedScenario === 'Ramp'
-                        ? 'Scale'
-                        : 'Pilot';
-                  setState(duplicateScenario(state, state.selectedScenario, target));
-                }}
-              >
-                Duplicate Scenario
-              </button>
+<button
+  onClick={() => {
+    const name = prompt('New scenario name?');
+    if (!name) return;
+    if (state.scenarios[name]) {
+      alert('Scenario already exists');
+      return;
+    }
+
+    setState((s) => ({
+      ...s,
+      scenarios: {
+        ...s.scenarios,
+        [name]: structuredClone(s.scenarios[s.selectedScenario]),
+      },
+      selectedScenario: name,
+    }));
+  }}
+>
+  + New Scenario
+</button>
+
+<button
+  onClick={() => {
+    const current = state.selectedScenario;
+    const name = prompt('Rename scenario to?', current);
+    if (!name || name === current) return;
+
+    if (state.scenarios[name]) {
+      alert('Scenario already exists');
+      return;
+    }
+
+    const copy = { ...state.scenarios };
+    copy[name] = copy[current];
+    delete copy[current];
+
+    setState((s) => ({
+      ...s,
+      scenarios: copy,
+      selectedScenario: name,
+    }));
+  }}
+>
+  Rename
+</button>
+
+<button
+  onClick={() => {
+    const current = state.selectedScenario;
+    if (!confirm(`Delete scenario "${current}"?`)) return;
+
+    const copy = { ...state.scenarios };
+    delete copy[current];
+
+    const remaining = Object.keys(copy);
+    if (remaining.length === 0) {
+      alert('You must have at least one scenario.');
+      return;
+    }
+
+    setState((s) => ({
+      ...s,
+      scenarios: copy,
+      selectedScenario: remaining[0],
+    }));
+  }}
+>
+  Delete
+</button>
 
               <button
                 onClick={() =>
