@@ -1,4 +1,4 @@
-export type ScenarioName = 'Pilot' | 'Ramp' | 'Scale';
+export type ScenarioName = string;
 
 export interface PlanningDecision {
   id: string;
@@ -171,7 +171,7 @@ export interface RiskEntry {
 }
 
 export interface ScenarioData {
-  name: ScenarioName;
+  name: string;
 
   decisions: PlanningDecision[];
   capas: CapaItem[];
