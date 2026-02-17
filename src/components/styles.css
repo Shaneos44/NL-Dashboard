@@ -329,3 +329,85 @@ hr{
   border-radius: 8px;
   padding: 4px 6px;
 }
+/* --- Month calendar upgrade --- */
+.cal-dow{
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+.cal-dow-cell{
+  font-size: 11px;
+  color: var(--muted);
+  padding: 6px 8px;
+  opacity: 0.9;
+}
+
+.cal-month-grid{
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.cal-day{
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  padding: 8px;
+  min-height: 120px;
+  background: rgba(255,255,255,0.03);
+  display: flex;
+  flex-direction: column;
+}
+
+.cal-day:hover{
+  background: rgba(255,255,255,0.045);
+  border-color: rgba(96,165,250,0.35);
+}
+
+.cal-outside{
+  opacity: 0.55;
+  filter: grayscale(0.2);
+}
+
+.cal-today{
+  outline: 1px solid rgba(96,165,250,0.55);
+}
+
+.cal-day-head{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.cal-date{
+  font-weight: 800;
+  font-size: 12px;
+  opacity: 0.95;
+}
+
+.cal-day-badges{
+  display:flex;
+  gap: 6px;
+}
+
+.cal-badge{
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+  color: var(--muted);
+}
+
+.cal-item-compact{
+  padding: 6px 8px;
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+
+@media (max-width: 1000px){
+  .cal-wrap{ grid-template-columns: 1fr; }
+  .cal-day{ min-height: 110px; }
+}
