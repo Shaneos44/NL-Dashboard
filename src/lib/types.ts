@@ -107,6 +107,34 @@ export interface ProcessTemplate {
   notes: string;
 }
 
+
+export interface SensorLookupEntry {
+  id: string;
+  sensorTag: string;
+  equipment: string;
+  location: string;
+  unit: string;
+  processStep: string;
+  criticalToQuality: boolean;
+}
+
+export interface SensorReading {
+  id: string;
+  batchNumber: string;
+  timestamp: string;
+  sensorTag: string;
+  value: number;
+  comment: string;
+}
+
+export interface ProcessParameterValue {
+  id: string;
+  batchNumber: string;
+  parameter: string;
+  value: number;
+  unit: string;
+}
+
 export type BatchStatus =
   | 'Planned'
   | 'In Progress'
@@ -190,6 +218,10 @@ export interface ScenarioData {
   logistics: LogisticsLane[];
   warehouses: Warehouse[];
   risks: RiskEntry[];
+
+  sensorLookup: SensorLookupEntry[];
+  sensorReadings?: SensorReading[];
+  processParameters?: ProcessParameterValue[];
 
   auditLog: string[];
 }
