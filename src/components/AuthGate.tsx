@@ -21,12 +21,25 @@ export function AuthGate(props: { children: React.ReactNode }) {
     if (!sb) return;
 
     let alive = true;
+    const timeout = window.setTimeout(() => {
+      if (!alive) return;
+      setChecking(false);
+      setErr('Session check timed out. You can still sign in below.');
+    }, 7000);
 
     (async () => {
-      const { data } = await sb.auth.getSession();
-      if (!alive) return;
-      setSession(data.session ?? null);
-      setChecking(false);
+      try {
+        const { data } = await sb.auth.getSession();
+        if (!alive) return;
+        setSession(data.session ?? null);
+      } catch (e: any) {
+        if (!alive) return;
+        setErr(e?.message ?? 'Could not verify session.');
+      } finally {
+        if (!alive) return;
+        window.clearTimeout(timeout);
+        setChecking(false);
+      }
     })();
 
     const { data: sub } = sb.auth.onAuthStateChange((_event, s) => {
@@ -36,6 +49,7 @@ export function AuthGate(props: { children: React.ReactNode }) {
 
     return () => {
       alive = false;
+      window.clearTimeout(timeout);
       sub.subscription.unsubscribe();
     };
   }, [sb]);
