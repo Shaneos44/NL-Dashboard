@@ -186,6 +186,14 @@ const baseScenario = (name: ScenarioName, demand: number): ScenarioData => ({
     { id: 'r2', area: 'Quality', status: 'Green', mitigation: 'SPC on line-side torque', owner: '' },
   ],
 
+  sensorLookup: [
+    { id: 'sl1', sensorTag: 'TEMP-01', equipment: 'Assembly Line #1', location: 'Station A', unit: '°C', processStep: 'Final Assembly', criticalToQuality: true },
+    { id: 'sl2', sensorTag: 'PRESS-01', equipment: 'Test Bench #1', location: 'Chamber 1', unit: 'kPa', processStep: 'Test & Pack', criticalToQuality: false },
+  ],
+
+  sensorReadings: [],
+  processParameters: [],
+
   auditLog: [`Scenario ${name} initialised (${today})`],
 });
 
